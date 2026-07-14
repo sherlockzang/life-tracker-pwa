@@ -1,5 +1,4 @@
 import type { FlightDetails, LifeRecord, MetroDetails, RailDetails, RailSystemType, TransportDetails, TransportType } from "../types";
-import { normalizeAircraftType } from "./aircraftTypes";
 
 export const RAIL_SYSTEM_LABELS: Record<RailSystemType, string> = {
   china_hsr: "中国高铁",
@@ -29,7 +28,7 @@ export function normalizeTransportDetails(type: TransportType, value: unknown): 
       gate: stringValue(value.gate) || undefined,
       registration: stringValue(value.registration) || undefined,
       seat: stringValue(value.seat) || undefined,
-      aircraft_type: normalizeAircraftType(stringValue(value.aircraft_type)) || undefined,
+      aircraft_type: stringValue(value.aircraft_type) || undefined,
       notes: stringValue(value.notes) || undefined
     } satisfies FlightDetails;
   }

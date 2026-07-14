@@ -16,7 +16,6 @@ import { DEMO_USER, loadDemoData, resetDemoData, saveDemoData } from "./lib/demo
 import { startDemoSession } from "./lib/account";
 import { generateDailySummary } from "./lib/ai";
 import { dateInZone } from "./lib/tripDates";
-import { HomeRouteSearch } from "./components/HomeRouteSearch";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -47,14 +46,7 @@ export default function App() {
   const [dailySummary, setDailySummary] = useState("");
 
   useEffect(() => {
-    let mounted = true;
-    const readSession = async () => {
-      const { data: authData } = await supabase.auth.getSession();
-      if (!mounted) return;
-      setSession(authData.session);
-      setAuthReady(true);
-    };
-    void readSession();
+    supabase.auth.getSession().then(({ data: authData }) => { setSession(authData.session); setAuthReady(true); });
     const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
       if (nextSession && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
@@ -63,16 +55,7 @@ export default function App() {
       }
       setAuthReady(true);
     });
-    const onVisible = () => { if (document.visibilityState === "visible") void readSession(); };
-    const onPageShow = () => void readSession();
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      mounted = false;
-      subscription.subscription.unsubscribe();
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("pageshow", onPageShow);
-    };
+    return () => subscription.subscription.unsubscribe();
   }, []);
 
   const user = demoMode ? DEMO_USER : session?.user || null;
@@ -238,7 +221,7 @@ export default function App() {
         {view === "timeline" && (
           <>
             {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{dailySummary || `${currentTrip.destination}，今天也去留下一点什么吧。`}</p></div><ChevronRight /></button>}
-            <div className="home-quick-grid"><QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} /><HomeRouteSearch trips={data.trips} records={data.records} isDemo={demoMode} onSave={saveRecord} /></div>
+            <QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} />
             <div className="filter-row">
               <div className="filter-tabs" role="tablist">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
               <button className="planner-link" onClick={() => setView("planner")}><MapPinned size={16} />行程规划<ChevronRight size={15} /></button>

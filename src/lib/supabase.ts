@@ -14,3 +14,5 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     flowType: "pkce"
   }
 });
+
+export const magicLinkRedirect = () => new URL(import.meta.env.BASE_URL, window.location.origin).toString();

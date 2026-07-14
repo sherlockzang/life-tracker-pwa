@@ -5,7 +5,6 @@ import type { Changelog, Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, 
 import { APP_VERSION } from "../version";
 import { normalizeTransport } from "./transport";
 import { mergeBundledReleaseNotes } from "./releaseNotes";
-import { normalizeAircraftType } from "./aircraftTypes";
 
 export interface AppData {
   records: LifeRecord[];
@@ -46,13 +45,12 @@ export function defaultProfile(user: User): UserProfile {
 
 const normalizeRecord = (row: Record<string, unknown>): LifeRecord => {
   const transport = normalizeTransport(row.transport_type, row.transport_details);
-  const actualInfo = row.actual_info as NonNullable<LifeRecord["actual_info"]> | null;
   return {
     ...(row as unknown as LifeRecord),
     amount: row.amount == null ? null : Number(row.amount),
     sort_order: row.sort_order == null ? null : Number(row.sort_order),
     actual_match_status: (row.actual_match_status || "never") as LifeRecord["actual_match_status"],
-    actual_info: actualInfo ? { ...actualInfo, aircraft_type: normalizeAircraftType(actualInfo.aircraft_type) } : null,
+    actual_info: (row.actual_info || null) as LifeRecord["actual_info"],
     actual_info_matched: Boolean(row.actual_info_matched),
     actual_matched_at: typeof row.actual_matched_at === "string" ? row.actual_matched_at : null,
     actual_match_provider: typeof row.actual_match_provider === "string" ? row.actual_match_provider : null,
