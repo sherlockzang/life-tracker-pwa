@@ -11,6 +11,21 @@
 
 迁移会创建个人记录、行程、交通模板、资料和更新记录所需的数据结构与 RLS，并配置头像与记录图片存储桶。
 
+## Aviationstack 航班查询
+
+航班查询使用服务端 Secret `AVIATIONSTACK_API_KEY`，由 `lookup-flight` Edge Function 代理。真实 Key 不得放进前端环境变量或提交到仓库。
+
+部署函数：
+
+```bash
+npx supabase login
+npx supabase link --project-ref ihqkgtmikwdakhyglels
+npx supabase secrets set AVIATIONSTACK_API_KEY=你的密钥 --project-ref ihqkgtmikwdakhyglels
+npx supabase functions deploy lookup-flight --project-ref ihqkgtmikwdakhyglels
+```
+
+网站只会在用户输入航班号并主动点击“自动获取航班信息”时调用接口。返回的候选航班需要确认后才会填入表单，避免误用数据和无意消耗月度额度。
+
 ## DeepSeek 路线查询
 
 API Key 只保存在 Supabase Edge Function 的服务端环境中，绝不能写进 `VITE_*` 变量、前端源码或 GitHub 仓库。

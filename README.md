@@ -16,6 +16,8 @@
 - 13 种币种、自动汇率缓存、分类占比和每日趋势图
 - 多行程管理、按日期动态生成 Day、拖拽排序与跨天移动
 - 飞机、高铁和地铁结构化交通模板，以及交通计划智能摘要
+- Aviationstack 实时航班查询、候选航班确认填入和起降地当地时区
+- 新行程目的地时区自动匹配，以及标准 IANA 时区选择
 - DeepSeek 路线查询预览与确认填入，API Key 仅保存在 Supabase Edge Function
 - 计划状态打卡，以及“计划 → 实际消费/随记”的父子结构
 - 以 iPhone 17 Pro 为主的灵动岛安全区域与 PWA 适配
@@ -61,6 +63,7 @@ supabase/migrations/20260714010000_profiles_changelogs.sql
 supabase/migrations/20260714020000_release_1_1_1.sql
 supabase/migrations/20260714030000_release_1_1_2.sql
 supabase/migrations/20260714040000_release_1_2_0_transport.sql
+supabase/migrations/20260714050000_release_1_2_1_flight_lookup.sql
 ```
 
 ### 数据表

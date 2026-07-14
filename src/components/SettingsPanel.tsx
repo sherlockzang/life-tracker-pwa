@@ -75,7 +75,7 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
         <header><div><p className="eyebrow">使用说明</p><h2 id="usage-guide-title">记录与规划指南</h2><p>从快速记录到交通安排，都可以在这里随时回看。</p></div><button type="button" className="icon-button" aria-label="关闭使用说明" onClick={onClose}><X /></button></header>
         <div className="usage-guide-list">
           <article><span className="settings-icon blue"><BookOpen /></span><div><h3>日常记录</h3><p>从首页顶部或底部加号添加消费、行程和随记。日常内容建议优先使用文字，必要时再补充图片，让长期记录保持轻巧、清晰，也更方便检索和回顾。</p></div></article>
-          <article><span className="settings-icon green"><Smartphone /></span><div><h3>交通计划</h3><p>进入行程规划并选择飞机、铁路或市内交通模板，填写对应信息后保存。时间线会自动提炼航班号、车次、站点与时间，登机口和实际乘车路线也可以稍后补记。</p></div></article>
+          <article><span className="settings-icon green"><Smartphone /></span><div><h3>交通计划</h3><p>进入行程规划并选择飞机、铁路或市内交通模板。飞机模板可输入航班号后主动查询并确认填入；起飞和降落分别使用当地时区。时间线会自动提炼航班号、车次、站点与时间，登机口和实际乘车路线也可以稍后补记。</p></div></article>
           <article><span className="settings-icon violet"><Bot /></span><div><h3>AI 路线查询</h3><p>配置 DeepSeek 后，在市内交通模板填写起点、终点和预计时间，点击“AI 查询路线”。先检查并编辑返回内容，再点击“填入路线”，最后保存计划；AI 结果不会自动写入记录。</p></div></article>
         </div>
         <footer><button type="button" className="primary-button" onClick={onClose}>完成</button></footer>

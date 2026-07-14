@@ -44,3 +44,4 @@ vite.config.d.ts
 /.wrangler/
 /outputs/
 /work/
+/supabase/.temp/

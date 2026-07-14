@@ -2,3 +2,6 @@ project_id = "ihqkgtmikwdakhyglels"
 
 [functions.query-transit-route]
 verify_jwt = true
+
+[functions.lookup-flight]
+verify_jwt = true

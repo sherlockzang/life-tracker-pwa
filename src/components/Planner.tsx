@@ -7,6 +7,7 @@ import type { Currency, FlightDetails, LifeRecord, MetroDetails, RailDetails, Re
 import { formatDateTime, formatMoney } from "../types";
 import { dateInZone, zonedDateTimeToIso } from "../lib/tripDates";
 import { getTransportPresentation } from "../lib/transport";
+import { detectTimeZone, TIMEZONE_OPTIONS, timeZoneLabel } from "../lib/timezones";
 import { QuickComposer } from "./QuickComposer";
 import { TransportDetailsPanel, TransportPlanEditor } from "./TransportPlanEditor";
 
@@ -29,6 +30,12 @@ function dateRange(start: string, end: string) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return result;
+}
+
+function planDate(record: LifeRecord, trip: Trip) {
+  if (record.transport_type === "flight" && record.transport_details) return (record.transport_details as FlightDetails).departure.date;
+  if (record.transport_type === "rail" && record.transport_details) return (record.transport_details as RailDetails).departure.date;
+  return dateInZone(record.event_at, trip.timezone);
 }
 
 export function Planner({ trips, records, onSaveTrip, onSaveRecord, onUpdateRecord, initialTripId, baseCurrency }: Props) {
@@ -58,12 +65,19 @@ export function Planner({ trips, records, onSaveTrip, onSaveRecord, onUpdateReco
 
 function TripForm({ onSave, onClose }: { onSave: (draft: TripDraft) => Promise<void>; onClose: () => void }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [draft, setDraft] = useState<TripDraft>({ name: "", destination: "", start_date: today, end_date: today, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  const deviceTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [draft, setDraft] = useState<TripDraft>({ name: "", destination: "", start_date: today, end_date: today, timezone: deviceTimeZone });
+  const [timezoneMode, setTimezoneMode] = useState<"device" | "detected" | "manual">("device");
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); await onSave(draft); setSaving(false);
   }
-  return <div className="modal-backdrop"><form className="modal-card glass-card" onSubmit={submit}><header><div><p className="eyebrow">新行程</p><h2>下一站去哪里？</h2></div><button type="button" className="icon-button" onClick={onClose}><X /></button></header><label>行程名称<input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：悉尼夏日漫游" required /></label><label>目的地<input value={draft.destination} onChange={(event) => setDraft({ ...draft, destination: event.target.value })} placeholder="城市或国家" required /></label><div className="form-row"><label>开始日期<input type="date" value={draft.start_date} onChange={(event) => setDraft({ ...draft, start_date: event.target.value, end_date: event.target.value > draft.end_date ? event.target.value : draft.end_date })} required /></label><label>结束日期<input type="date" min={draft.start_date} value={draft.end_date} onChange={(event) => setDraft({ ...draft, end_date: event.target.value })} required /></label></div><label>行程时区<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} required /></label><footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving}>{saving ? "创建中…" : "创建行程"}</button></footer></form></div>;
+  function updateDestination(destination: string) {
+    const detected = detectTimeZone(destination);
+    setDraft((current) => ({ ...current, destination, timezone: timezoneMode !== "manual" && detected ? detected : current.timezone }));
+    if (timezoneMode !== "manual") setTimezoneMode(detected ? "detected" : "device");
+  }
+  return <div className="modal-backdrop"><form className="modal-card glass-card trip-form" onSubmit={submit}><header><div><p className="eyebrow">新行程</p><h2>下一站去哪里？</h2></div><button type="button" className="icon-button" aria-label="关闭新行程" onClick={onClose}><X /></button></header><label>行程名称<input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：悉尼夏日漫游" required /></label><label>目的地<input value={draft.destination} onChange={(event) => updateDestination(event.target.value)} placeholder="城市或国家" required /></label><div className="form-row"><label>开始日期<input type="date" value={draft.start_date} onChange={(event) => setDraft({ ...draft, start_date: event.target.value, end_date: event.target.value > draft.end_date ? event.target.value : draft.end_date })} required /></label><label>结束日期<input type="date" min={draft.start_date} value={draft.end_date} onChange={(event) => setDraft({ ...draft, end_date: event.target.value })} required /></label></div><label>行程时区<select value={draft.timezone} onChange={(event) => { setDraft({ ...draft, timezone: event.target.value }); setTimezoneMode("manual"); }} required>{TIMEZONE_OPTIONS.map((timezone) => <option value={timezone} key={timezone}>{timeZoneLabel(timezone)}</option>)}</select><span className="field-help">{timezoneMode === "detected" ? "已根据目的地自动匹配，可手动调整" : timezoneMode === "manual" ? "已手动选择行程时区" : "输入目的地后自动匹配；当前暂用设备时区"}</span></label><footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving}>{saving ? "创建中…" : "创建行程"}</button></footer></form></div>;
 }
 
 function TripBoard({ trip, records, onBack, onSaveRecord, onUpdateRecord, baseCurrency }: { trip: Trip; records: LifeRecord[]; onBack: () => void; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; baseCurrency: Currency }) {
@@ -78,17 +92,19 @@ function TripBoard({ trip, records, onBack, onSaveRecord, onUpdateRecord, baseCu
     if (!active || !event.over) return;
     const overId = String(event.over.id);
     const overPlan = plans.find((item) => item.id === overId);
-    const targetDate = overId.startsWith("day:") ? overId.slice(4) : overPlan ? dateInZone(overPlan.event_at, trip.timezone) : null;
+    const targetDate = overId.startsWith("day:") ? overId.slice(4) : overPlan ? planDate(overPlan, trip) : null;
     if (!targetDate) return;
-    const targetItems = plans.filter((item) => dateInZone(item.event_at, trip.timezone) === targetDate).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const targetItems = plans.filter((item) => planDate(item, trip) === targetDate).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     const targetIndex = overPlan ? Math.max(0, targetItems.findIndex((item) => item.id === overPlan.id)) : targetItems.length;
-    const currentTime = new Intl.DateTimeFormat("en-GB", { timeZone: trip.timezone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(active.event_at));
+    const activeFlight = active.transport_type === "flight" && active.transport_details ? active.transport_details as FlightDetails : null;
+    const currentTime = activeFlight?.departure.time || new Intl.DateTimeFormat("en-GB", { timeZone: trip.timezone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(active.event_at));
+    const eventTimeZone = activeFlight?.departure.timezone || trip.timezone;
     const movedDetails = active.transport_type === "flight" && active.transport_details
       ? { ...(active.transport_details as FlightDetails), departure: { ...(active.transport_details as FlightDetails).departure, date: targetDate } }
       : active.transport_type === "rail" && active.transport_details
         ? { ...(active.transport_details as RailDetails), departure: { ...(active.transport_details as RailDetails).departure, date: targetDate } }
         : active.transport_details;
-    await onUpdateRecord({ ...active, event_at: zonedDateTimeToIso(targetDate, currentTime, trip.timezone), transport_details: movedDetails, sort_order: (targetIndex + 1) * 1000, updated_at: new Date().toISOString() });
+    await onUpdateRecord({ ...active, event_at: zonedDateTimeToIso(targetDate, currentTime, eventTimeZone), transport_details: movedDetails, sort_order: (targetIndex + 1) * 1000, updated_at: new Date().toISOString() });
   }
 
   return (
@@ -97,7 +113,7 @@ function TripBoard({ trip, records, onBack, onSaveRecord, onUpdateRecord, baseCu
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <div className="day-board">
           {days.map((day, index) => {
-            const items = plans.filter((item) => dateInZone(item.event_at, trip.timezone) === day).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+            const items = plans.filter((item) => planDate(item, trip) === day).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
             return <DayColumn key={day} day={day} dayNumber={index + 1} items={items} records={records} expanded={expanded} onExpand={setExpanded} onAdd={() => setAddingDay(day)} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} trip={trip} adding={addingDay === day} onCloseAdd={() => setAddingDay(null)} baseCurrency={baseCurrency} />;
           })}
         </div>
@@ -119,9 +135,12 @@ function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSav
   const presentation = getTransportPresentation(item);
   const planSubtitle = item.transport_type ? presentation.subtitle : [item.location, item.notes].filter(Boolean).join(" · ");
   const suggestedRoute = item.transport_type === "metro" ? (item.transport_details as MetroDetails | null)?.route_description || "" : "";
+  const displayTime = item.transport_type === "flight" && item.transport_details
+    ? (item.transport_details as FlightDetails).departure.time
+    : new Intl.DateTimeFormat("zh-CN", { timeZone: trip.timezone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(item.event_at));
   return <>
     <article ref={sortable.setNodeRef} style={style} className={`plan-item glass-card ${sortable.isDragging ? "dragging" : ""} ${item.plan_status}`}>
-      <div className="plan-summary"><button className="drag-handle" aria-label="拖动计划排序" {...sortable.attributes} {...sortable.listeners}><GripVertical size={18} /></button><button className="plan-check" aria-label={item.plan_status === "completed" ? "标记为计划中" : "标记完成"} onClick={() => void onUpdate({ ...item, plan_status: item.plan_status === "completed" ? "planned" : "completed", updated_at: new Date().toISOString() })}>{item.plan_status === "completed" && <Check size={16} />}</button><div className="plan-time">{new Intl.DateTimeFormat("zh-CN", { timeZone: trip.timezone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(item.event_at))}</div><button className="plan-content" onClick={onExpand}><strong>{presentation.title}</strong>{planSubtitle && <span><em>{planSubtitle}</em></span>}</button><button className="icon-button" aria-label={expanded ? "收起计划详情" : "展开计划详情"} onClick={onExpand}>{expanded ? <ChevronDown /> : <ChevronRight />}</button></div>
+      <div className="plan-summary"><button className="drag-handle" aria-label="拖动计划排序" {...sortable.attributes} {...sortable.listeners}><GripVertical size={18} /></button><button className="plan-check" aria-label={item.plan_status === "completed" ? "标记为计划中" : "标记完成"} onClick={() => void onUpdate({ ...item, plan_status: item.plan_status === "completed" ? "planned" : "completed", updated_at: new Date().toISOString() })}>{item.plan_status === "completed" && <Check size={16} />}</button><div className="plan-time">{displayTime}</div><button className="plan-content" onClick={onExpand}><strong>{presentation.title}</strong>{planSubtitle && <span><em>{planSubtitle}</em></span>}</button><button className="icon-button" aria-label={expanded ? "收起计划详情" : "展开计划详情"} onClick={onExpand}>{expanded ? <ChevronDown /> : <ChevronRight />}</button></div>
       {expanded && <div className="plan-expanded">
         <TransportDetailsPanel record={item} onUpdate={onUpdate} onEdit={() => setEditing(true)} />
         <div className="actual-heading"><span>实际发生</span><small>{actualRecords.length} 条记录</small></div>
@@ -130,6 +149,6 @@ function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSav
         <div className="plan-status-actions"><button className={item.plan_status === "planned" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "planned", updated_at: new Date().toISOString() })}><Clock3 size={14} />计划中</button><button className={item.plan_status === "completed" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "completed", updated_at: new Date().toISOString() })}><Check size={14} />已完成</button><button className={item.plan_status === "cancelled" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "cancelled", updated_at: new Date().toISOString() })}><X size={14} />已取消</button></div>
       </div>}
     </article>
-    {editing && <TransportPlanEditor modal day={dateInZone(item.event_at, trip.timezone)} trip={trip} count={0} record={item} onSave={onSaveRecord} onUpdate={onUpdate} onClose={() => setEditing(false)} />}
+    {editing && <TransportPlanEditor modal day={planDate(item, trip)} trip={trip} count={0} record={item} onSave={onSaveRecord} onUpdate={onUpdate} onClose={() => setEditing(false)} />}
   </>;
 }

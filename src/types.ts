@@ -9,8 +9,8 @@ export type ThemeMode = "system" | "dark" | "light";
 export interface FlightDetails {
   airline: string;
   flight_number: string;
-  departure: { date: string; time: string; airport: string; terminal: string };
-  arrival: { date: string; time: string; airport: string; terminal: string };
+  departure: { date: string; time: string; airport: string; terminal: string; timezone?: string };
+  arrival: { date: string; time: string; airport: string; terminal: string; timezone?: string };
   gate?: string;
   registration?: string;
   seat?: string;

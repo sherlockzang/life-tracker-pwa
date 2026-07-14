@@ -8,8 +8,25 @@ const RELEASE_1_2_0_SUMMARY = [
   "优化 iPhone 17 Pro 灵动岛安全区域、桌面 PWA 显示与部分移动端交互。"
 ];
 
+const RELEASE_1_2_1_SUMMARY = [
+  "飞机模板新增 Aviationstack 实时航班查询：输入 IATA 航班号并主动点击查询，可核对候选航班的日期、机场、航站楼、登机口、机型和状态，再确认填入；每次点击只消耗 1 次接口额度。",
+  "航班的起飞与降落信息分别保存当地时区。例如从洛杉矶飞往东京时，可同时保留 America/Los_Angeles 和 Asia/Tokyo，卡片始终显示机场当地日期与时间。",
+  "创建行程时会根据目的地自动匹配行程时区，并提供标准 IANA 时区列表供手动调整。",
+  "所有非必填输入项现已明确标注“选填”，减少填写时的疑惑。"
+];
+
+const BUNDLED_RELEASES: Changelog[] = [
+  { id: "bundled-1.2.1", version: "1.2.1", summary: RELEASE_1_2_1_SUMMARY, created_at: "2026-07-14T09:30:00.000Z" },
+  { id: "bundled-1.2.0", version: "1.2.0", summary: RELEASE_1_2_0_SUMMARY, created_at: "2026-07-14T08:00:00.000Z" }
+];
+
 export function mergeBundledReleaseNotes(changelogs: Changelog[]) {
-  return changelogs.map((release) => release.version === "1.2.0"
-    ? { ...release, summary: RELEASE_1_2_0_SUMMARY }
-    : release);
+  const bundledVersions = new Set(BUNDLED_RELEASES.map((release) => release.version));
+  return [
+    ...BUNDLED_RELEASES.map((bundled) => {
+      const remote = changelogs.find((release) => release.version === bundled.version);
+      return remote ? { ...remote, summary: bundled.summary } : bundled;
+    }),
+    ...changelogs.filter((release) => !bundledVersions.has(release.version))
+  ];
 }

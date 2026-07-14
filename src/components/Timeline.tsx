@@ -1,5 +1,5 @@
 import { CalendarClock, Check, CircleDollarSign, Clock3, MapPin, NotebookPen, ReceiptText, Route, Sparkles, X } from "lucide-react";
-import type { Currency, LifeRecord, RecordType, Trip } from "../types";
+import type { Currency, FlightDetails, LifeRecord, RecordType, Trip } from "../types";
 import { CATEGORY_META, formatDateTime, formatMoney } from "../types";
 import { getTransportPresentation } from "../lib/transport";
 
@@ -14,10 +14,16 @@ interface Props {
 const icons = { expense: ReceiptText, trip: Route, note: NotebookPen };
 const labels = { expense: "消费", trip: "行程", note: "随记" };
 
+function localDateKey(record: LifeRecord) {
+  if (record.transport_type === "flight" && record.transport_details) return (record.transport_details as FlightDetails).departure.date;
+  const date = new Date(record.event_at);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function Timeline({ records, trips, filter, onStatus }: Props) {
   const visible = records.filter((record) => !record.parent_plan_id && (filter === "all" || record.record_type === filter)).sort((a, b) => b.event_at.localeCompare(a.event_at));
   const grouped = visible.reduce<Record<string, LifeRecord[]>>((acc, record) => {
-    const date = new Date(record.event_at).toDateString();
+    const date = localDateKey(record);
     (acc[date] ||= []).push(record);
     return acc;
   }, {});
@@ -30,7 +36,7 @@ export function Timeline({ records, trips, filter, onStatus }: Props) {
     <section className="timeline">
       {Object.entries(grouped).map(([date, items]) => (
         <div className="timeline-day" key={date}>
-          <div className="day-label"><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(date))}</span><small>{new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(date))}</small></div>
+          <div className="day-label"><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(`${date}T12:00:00`))}</span><small>{new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(`${date}T12:00:00`))}</small></div>
           <div className="day-records">
             {items.map((record) => <RecordCard key={record.id} record={record} trip={trips.find((trip) => trip.id === record.trip_id)} onStatus={onStatus} />)}
           </div>
@@ -43,11 +49,14 @@ export function Timeline({ records, trips, filter, onStatus }: Props) {
 function RecordCard({ record, trip, onStatus }: { record: LifeRecord; trip?: Trip; onStatus: Props["onStatus"] }) {
   const Icon = icons[record.record_type];
   const presentation = getTransportPresentation(record);
+  const displayTime = record.transport_type === "flight" && record.transport_details
+    ? (record.transport_details as FlightDetails).departure.time
+    : formatDateTime(record.event_at).split(" ").slice(-1);
   return (
     <article className={`record-card glass-card record-${record.record_type}`}>
       <span className="record-icon"><Icon size={20} /></span>
       <div className="record-main">
-        <div className="record-meta"><span>{record.transport_type ? presentation.label : labels[record.record_type]}</span><i>·</i><time>{formatDateTime(record.event_at).split(" ").slice(-1)}</time>{trip && <em>{trip.name}</em>}</div>
+        <div className="record-meta"><span>{record.transport_type ? presentation.label : labels[record.record_type]}</span><i>·</i><time>{displayTime}</time>{trip && <em>{trip.name}</em>}</div>
         <h3>{presentation.title}</h3>
         {presentation.subtitle && <p>{presentation.subtitle}</p>}
         <div className="record-details">
