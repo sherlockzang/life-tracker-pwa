@@ -11,6 +11,15 @@
 
 迁移会创建个人记录、行程、交通模板、资料和更新记录所需的数据结构与 RLS，并配置头像与记录图片存储桶。
 
+## 邮箱验证码登录
+
+Life Tracker 1.4.0 使用 Supabase Email OTP。新账号的 **Confirm signup** 模板和已有账号的 **Magic Link** 模板都必须显示 `{{ .Token }}`，不能只提供 `{{ .ConfirmationURL }}` 链接。仓库内对应模板为：
+
+- `templates/confirmation-otp.html`
+- `templates/magic-link-otp.html`
+
+用户收到 6 位数字验证码后直接在 PWA 内输入，因此 iOS 主屏幕 PWA 不需要通过 Safari 回传登录状态。
+
 ## Aviationstack 航班查询
 
 航班查询使用服务端 Secret `AVIATIONSTACK_API_KEY`，由 `lookup-flight` Edge Function 代理。真实 Key 不得放进前端环境变量或提交到仓库。
