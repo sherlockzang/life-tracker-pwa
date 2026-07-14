@@ -790,6 +790,22 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .toast { color: #ffffff; background: #1c1c1e; border: 1px solid #2c2c2e; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
 .loading-screen { background: var(--bg); }
 
+.release-history-modal { width: min(620px, 100%); max-height: min(820px, 90vh); display: flex; flex-direction: column; overflow: hidden; }
+.release-history-modal > header { flex: none; }
+.release-history-modal > header h2 { margin-bottom: 6px; }
+.release-history-modal > header p:last-child { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.release-history-list { display: grid; gap: 12px; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
+.release-entry { padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); }
+.release-entry-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.release-entry-heading strong { display: block; font-size: 16px; letter-spacing: -.01em; }
+.release-entry-heading time { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.release-entry-heading > span { flex: none; padding: 5px 8px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 10px; font-weight: 700; }
+.release-entry ul { display: grid; gap: 9px; margin: 16px 0 0; padding: 16px 0 0; border-top: 1px solid var(--border); list-style: none; }
+.release-entry li { display: flex; align-items: flex-start; gap: 9px; color: var(--text-soft); font-size: 13px; line-height: 1.55; }
+.release-entry li svg { flex: none; margin-top: 2px; color: var(--accent); }
+.release-history-empty { margin: 12px 0; color: var(--muted); text-align: center; font-size: 13px; }
+.release-history-modal > footer { flex: none; }
+
 @media (max-width: 620px) {
   .login-shell { padding-bottom: 76px; }
   .login-story h1,
@@ -807,6 +823,8 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
   .mobile-nav .mobile-add { border-radius: 12px; }
   .settings-footer { flex-direction: column; gap: 6px; }
   .settings-footer span + span::before { display: none; }
+  .release-history-modal { max-height: calc(100vh - 20px); padding: 20px; }
+  .release-entry { padding: 16px; }
 }
 
 .profile-avatar.mini-avatar,

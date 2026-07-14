@@ -199,7 +199,7 @@ export default function App() {
           </>
         )}
         {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} onSaveTrip={saveTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
-        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} online={online} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onSignOut={() => void supabase.auth.signOut()} />}
+        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onSignOut={() => void supabase.auth.signOut()} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, Check, ChevronRight, Cloud, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
+import { Bell, Check, ChevronRight, Cloud, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
-import type { Currency, ThemeMode, UserProfile, UserSettings } from "../types";
+import type { Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
 import { CURRENCIES } from "../types";
 import { APP_VERSION } from "../version";
 import { ProfileAvatar } from "./ProfileAvatar";
@@ -10,6 +10,7 @@ interface Props {
   user: User;
   settings: UserSettings;
   profile: UserProfile;
+  changelogs: Changelog[];
   online: boolean;
   onUpdate: (settings: UserSettings) => void;
   onUpdateProfile: (profile: UserProfile, avatar?: Blob) => Promise<void>;
@@ -18,8 +19,9 @@ interface Props {
 
 const AVATAR_COLORS = ["#0A84FF", "#1C1C1E", "#3A3A3C", "#636366", "#8E8E93", "#D1D1D6"];
 
-export function SettingsPanel({ user, settings, profile, online, onUpdate, onUpdateProfile, onSignOut }: Props) {
+export function SettingsPanel({ user, settings, profile, changelogs, online, onUpdate, onUpdateProfile, onSignOut }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
+  const [showingReleaseHistory, setShowingReleaseHistory] = useState(false);
   const update = (patch: Partial<UserSettings>) => onUpdate({ ...settings, ...patch, updated_at: new Date().toISOString() });
 
   return (
@@ -37,6 +39,7 @@ export function SettingsPanel({ user, settings, profile, online, onUpdate, onUpd
           </section>
           <section className="settings-card glass-card">
             <button className="settings-row"><span className="settings-icon coral"><Bell /></span><div><b>行程提醒</b><small>即将到来的计划与每日摘要</small></div><em>稍后开放</em><ChevronRight /></button>
+            <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
             <button className="settings-row"><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
           </section>
         </div>
@@ -53,8 +56,45 @@ export function SettingsPanel({ user, settings, profile, online, onUpdate, onUpd
       </div>
       <footer className="app-footer settings-footer"><span>版本 {APP_VERSION}</span><span>© 2026 Sherlock Zang. 联系邮箱：sherlockzang8818@gmail.com</span></footer>
       {editingProfile && <ProfileEditor profile={profile} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
+      {showingReleaseHistory && <ReleaseHistory changelogs={changelogs} onClose={() => setShowingReleaseHistory(false)} />}
     </section>
   );
+}
+
+function ReleaseHistory({ changelogs, onClose }: { changelogs: Changelog[]; onClose: () => void }) {
+  const releases = [...changelogs].sort((left, right) => compareVersions(right.version, left.version));
+
+  return (
+    <div className="modal-backdrop">
+      <section className="modal-card release-history-modal glass-card" role="dialog" aria-modal="true" aria-labelledby="release-history-title">
+        <header><div><p className="eyebrow">版本历史</p><h2 id="release-history-title">更新记录</h2><p>从第一个版本开始，所有重要变化都留在这里。</p></div><button type="button" className="icon-button" aria-label="关闭更新记录" onClick={onClose}><X /></button></header>
+        <div className="release-history-list">
+          {releases.map((release) => (
+            <article className="release-entry" key={release.version}>
+              <div className="release-entry-heading"><div><strong>Life Tracker {release.version}</strong><time>{formatReleaseDate(release.created_at)}</time></div>{release.version === APP_VERSION && <span>当前版本</span>}</div>
+              <ul>{release.summary.map((item) => <li key={item}><Check size={15} /><span>{item}</span></li>)}</ul>
+            </article>
+          ))}
+          {!releases.length && <p className="release-history-empty">暂时无法读取更新记录，请联网后重试。</p>}
+        </div>
+        <footer><button type="button" className="primary-button" onClick={onClose}>完成</button></footer>
+      </section>
+    </div>
+  );
+}
+
+function compareVersions(left: string, right: string) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference) return difference;
+  }
+  return 0;
+}
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value));
 }
 
 function ProfileEditor({ profile, onClose, onSave }: { profile: UserProfile; onClose: () => void; onSave: Props["onUpdateProfile"] }) {
