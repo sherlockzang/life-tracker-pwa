@@ -1,0 +1,4 @@
+project_id = "ihqkgtmikwdakhyglels"
+
+[functions.query-transit-route]
+verify_jwt = true

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, Check, ChevronRight, Cloud, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
+import { Bell, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import type { Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
 import { CURRENCIES } from "../types";
@@ -41,6 +41,10 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             <button className="settings-row"><span className="settings-icon coral"><Bell /></span><div><b>行程提醒</b><small>即将到来的计划与每日摘要</small></div><em>稍后开放</em><ChevronRight /></button>
             <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
             <button className="settings-row"><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
+          </section>
+          <section className="settings-card glass-card credits-card" aria-labelledby="credits-title">
+            <header><span className="settings-icon blue"><HeartHandshake /></span><div><h2 id="credits-title">致谢</h2><p>感谢参与这个长期个人记录工具的伙伴</p></div></header>
+            <p lang="en">Built with the help of Codex, with special thanks to Claude for prompt design and development support.</p>
           </section>
         </div>
         <aside className="account-card glass-card">

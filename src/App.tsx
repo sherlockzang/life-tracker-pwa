@@ -206,10 +206,10 @@ export default function App() {
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
       {composerOpen && <div className="composer-modal"><div className="composer-modal-inner"><QuickComposer compact trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} onClose={() => setComposerOpen(false)} /></div></div>}
 
-      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
+      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
 
-      {toast && <div className="toast"><Sparkles size={15} />{toast}</div>}
-      {loading && <div className="sync-loader"><LoaderCircle className="spin" size={14} />正在同步</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><Sparkles size={15} />{toast}</div>}
+      {loading && <div className="sync-loader" role="status" aria-live="polite"><LoaderCircle className="spin" size={14} />正在同步</div>}
       {!data.profile.has_seen_onboarding && <Onboarding onComplete={() => updateProfile({ ...data.profile, has_seen_onboarding: true, updated_at: new Date().toISOString() }, undefined, "")} />}
       {data.profile.has_seen_onboarding && pendingChangelog && <WhatsNew changelog={pendingChangelog} onDismiss={() => updateProfile({ ...data.profile, last_seen_version: pendingChangelog.version, updated_at: new Date().toISOString() }, undefined, "")} />}
     </div>

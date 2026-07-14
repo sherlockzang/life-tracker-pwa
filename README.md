@@ -15,7 +15,11 @@
 - 消费 / 行程 / 随记统一快速输入和时间线筛选
 - 13 种币种、自动汇率缓存、分类占比和每日趋势图
 - 多行程管理、按日期动态生成 Day、拖拽排序与跨天移动
+- 飞机、高铁和地铁结构化交通模板，以及交通计划智能摘要
+- DeepSeek 路线查询预览与确认填入，API Key 仅保存在 Supabase Edge Function
 - 计划状态打卡，以及“计划 → 实际消费/随记”的父子结构
+- 以 iPhone 17 Pro 为主的灵动岛安全区域与 PWA 适配
+- 设置页提供长期保留的致谢栏目
 - 深色优先、浅色和跟随系统模式
 - PWA 安装、静态资源离线缓存、IndexedDB 数据快照和离线写入队列
 - GitHub Actions 自动部署到 GitHub Pages
@@ -56,13 +60,14 @@ supabase/migrations/20260714000000_initial_schema.sql
 supabase/migrations/20260714010000_profiles_changelogs.sql
 supabase/migrations/20260714020000_release_1_1_1.sql
 supabase/migrations/20260714030000_release_1_1_2.sql
+supabase/migrations/20260714040000_release_1_2_0_transport.sql
 ```
 
 ### 数据表
 
 - `user_settings`：主币种、主题偏好
 - `trips`：行程名称、目的地、日期和时区
-- `records`：消费、行程、随记统一记录；通过 `parent_plan_id` 关联实际执行记录
+- `records`：消费、行程、随记统一记录；通过 `parent_plan_id` 关联实际执行记录，并通过 `transport_type` 与 `transport_details` 保存结构化交通计划
 - `exchange_rates`：API 或手动汇率快照
 - `profiles`：昵称、头像、首次引导和版本已读状态
 - `changelogs`：面向用户展示的版本更新说明

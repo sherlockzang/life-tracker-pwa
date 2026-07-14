@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { listMutations, loadSnapshot, queueMutation, removeMutation, saveSnapshot } from "./offline";
 import type { Changelog, Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, TripDraft, UserProfile, UserSettings } from "../types";
 import { APP_VERSION } from "../version";
+import { normalizeTransport } from "./transport";
 
 export interface AppData {
   records: LifeRecord[];
@@ -41,11 +42,15 @@ export function defaultProfile(user: User): UserProfile {
   };
 }
 
-const normalizeRecord = (row: Record<string, unknown>): LifeRecord => ({
-  ...(row as unknown as LifeRecord),
-  amount: row.amount == null ? null : Number(row.amount),
-  sort_order: row.sort_order == null ? null : Number(row.sort_order)
-});
+const normalizeRecord = (row: Record<string, unknown>): LifeRecord => {
+  const transport = normalizeTransport(row.transport_type, row.transport_details);
+  return {
+    ...(row as unknown as LifeRecord),
+    amount: row.amount == null ? null : Number(row.amount),
+    sort_order: row.sort_order == null ? null : Number(row.sort_order),
+    ...transport
+  };
+};
 
 const normalizeRate = (row: Record<string, unknown>): ExchangeRate => ({
   ...(row as unknown as ExchangeRate),
@@ -86,7 +91,7 @@ export async function cachedAppData(user: User): Promise<AppData | null> {
   const cached = await loadSnapshot(user.id);
   if (!cached) return null;
   return {
-    records: cached.records,
+    records: cached.records.map((record) => normalizeRecord(record as unknown as Record<string, unknown>)),
     trips: cached.trips,
     rates: cached.rates,
     settings: cached.settings,
@@ -135,6 +140,8 @@ export function makeRecord(user: User, draft: RecordDraft): LifeRecord {
     plan_status: draft.plan_status || null,
     sort_order: draft.sort_order ?? null,
     parent_plan_id: draft.parent_plan_id || null,
+    transport_type: draft.transport_type ?? null,
+    transport_details: draft.transport_details ?? null,
     image_path: null,
     created_at: timestamp,
     updated_at: timestamp

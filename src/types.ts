@@ -1,8 +1,43 @@
 export type RecordType = "expense" | "trip" | "note";
 export type ExpenseCategory = "food" | "transport" | "shopping" | "stay" | "entertainment" | "other";
 export type PlanStatus = "planned" | "completed" | "cancelled";
+export type TransportType = "flight" | "rail" | "metro";
+export type RailSystemType = "china_hsr" | "japan_shinkansen" | "germany_db" | "taiwan_hsr" | "other";
 export type Currency = "USD" | "JPY" | "EUR" | "GBP" | "CNY" | "HKD" | "SGD" | "KRW" | "AUD" | "NZD" | "CHF" | "CAD" | "THB";
 export type ThemeMode = "system" | "dark" | "light";
+
+export interface FlightDetails {
+  airline: string;
+  flight_number: string;
+  departure: { date: string; time: string; airport: string; terminal: string };
+  arrival: { date: string; time: string; airport: string; terminal: string };
+  gate?: string;
+  registration?: string;
+  seat?: string;
+  aircraft_type?: string;
+  notes?: string;
+}
+
+export interface RailDetails {
+  system_type: RailSystemType;
+  custom_system?: string;
+  train_number: string;
+  departure: { date: string; time: string; station: string };
+  arrival: { date: string; time: string; station: string };
+  seat_carriage?: string;
+  notes?: string;
+}
+
+export interface MetroDetails {
+  origin: string;
+  destination: string;
+  estimated_departure_time?: string;
+  estimated_arrival_time?: string;
+  route_description?: string;
+  notes?: string;
+}
+
+export type TransportDetails = FlightDetails | RailDetails | MetroDetails;
 
 export interface UserSettings {
   user_id: string;
@@ -58,6 +93,8 @@ export interface LifeRecord {
   plan_status: PlanStatus | null;
   sort_order: number | null;
   parent_plan_id: string | null;
+  transport_type: TransportType | null;
+  transport_details: TransportDetails | null;
   image_path: string | null;
   created_at: string;
   updated_at: string;
@@ -88,6 +125,8 @@ export interface RecordDraft {
   plan_status?: PlanStatus;
   sort_order?: number;
   parent_plan_id?: string;
+  transport_type?: TransportType;
+  transport_details?: TransportDetails;
 }
 
 export interface TripDraft {

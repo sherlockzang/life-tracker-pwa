@@ -18,7 +18,7 @@ export function LoginScreen() {
       options: { emailRedirectTo: magicLinkRedirect(), shouldCreateUser: true }
     });
     if (authError) {
-      setError(authError.message);
+      setError(authError.message.toLowerCase().includes("rate limit") ? "请求过于频繁，请稍后再试" : "登录链接发送失败，请稍后重试");
       setStatus("idle");
       return;
     }
@@ -56,8 +56,8 @@ export function LoginScreen() {
           ) : (
             <form onSubmit={submit}>
               <label htmlFor="email">邮箱地址</label>
-              <div className="email-field"><Mail size={18} /><input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
-              {error && <p className="field-error">{error}</p>}
+              <div className="email-field"><Mail size={18} /><input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} required /></div>
+              {error && <p className="field-error" id="login-error" role="alert">{error}</p>}
               <button className="primary-button full" disabled={status === "sending"}>
                 {status === "sending" ? "正在发送…" : "发送登录链接"}<ArrowRight size={18} />
               </button>

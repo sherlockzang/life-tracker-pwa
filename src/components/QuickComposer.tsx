@@ -8,6 +8,9 @@ interface Props {
   defaultCurrency: Currency;
   forcedTripId?: string;
   parentPlanId?: string;
+  defaultType?: RecordType;
+  initialContent?: string;
+  initialNotes?: string;
   compact?: boolean;
   onSave: (draft: RecordDraft) => Promise<void>;
   onClose?: () => void;
@@ -28,11 +31,11 @@ const categoryIcons: Record<ExpenseCategory, typeof Coffee> = {
   other: Sparkles
 };
 
-export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlanId, compact, onSave, onClose }: Props) {
+export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlanId, defaultType, initialContent, initialNotes, compact, onSave, onClose }: Props) {
   const [open, setOpen] = useState(Boolean(compact));
-  const [type, setType] = useState<RecordType>(parentPlanId ? "expense" : "note");
-  const [content, setContent] = useState("");
-  const [notes, setNotes] = useState("");
+  const [type, setType] = useState<RecordType>(defaultType || (parentPlanId ? "expense" : "note"));
+  const [content, setContent] = useState(initialContent || "");
+  const [notes, setNotes] = useState(initialNotes || "");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(defaultCurrency);
   const [category, setCategory] = useState<ExpenseCategory>("food");
