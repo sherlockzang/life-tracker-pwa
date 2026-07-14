@@ -830,3 +830,8 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .profile-avatar.mini-avatar,
 .profile-avatar.avatar,
 .profile-avatar.profile-preview-avatar { background: var(--avatar-color, #0a84ff); }
+
+.brand-logo { display: block; flex: none; object-fit: cover; user-select: none; -webkit-user-drag: none; }
+.header-brand-logo { width: 30px; height: 30px; border-radius: 8px; }
+.login-brand-logo { width: 28px; height: 28px; border-radius: 8px; }
+.loading-brand-logo { width: 56px; height: 56px; border-radius: 15px; box-shadow: var(--card-shadow); }

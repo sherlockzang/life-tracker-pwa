@@ -11,6 +11,7 @@
 - 昵称、首字母头像与 2MB 内自定义头像上传
 - 新用户首次引导，以及按账号记录已读状态的版本更新提示
 - 设置页提供永久更新记录，可回看 1.0.0 起的所有版本说明
+- 网站品牌、Safari 桌面图标、PWA 图标和分享预览统一使用正式正方形 Logo
 - 消费 / 行程 / 随记统一快速输入和时间线筛选
 - 13 种币种、自动汇率缓存、分类占比和每日趋势图
 - 多行程管理、按日期动态生成 Day、拖拽排序与跨天移动
@@ -54,6 +55,7 @@ Publishable Key 会随静态前端发布，这是 Supabase 的预期用法；真
 supabase/migrations/20260714000000_initial_schema.sql
 supabase/migrations/20260714010000_profiles_changelogs.sql
 supabase/migrations/20260714020000_release_1_1_1.sql
+supabase/migrations/20260714030000_release_1_1_2.sql
 ```
 
 ### 数据表

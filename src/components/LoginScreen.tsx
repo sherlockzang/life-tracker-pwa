@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Mail, MapPinned, NotebookPen, ReceiptText, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Mail, MapPinned, NotebookPen, ReceiptText, ShieldCheck } from "lucide-react";
 import { magicLinkRedirect, supabase } from "../lib/supabase";
+import { BrandLogo } from "./BrandLogo";
 
 export function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -30,7 +31,7 @@ export function LoginScreen() {
       <div className="login-orb login-orb-two" />
       <section className="login-layout">
         <div className="login-story">
-          <div className="brand-mark"><Sparkles size={19} /> Life Tracker</div>
+          <div className="brand-mark"><BrandLogo className="login-brand-logo" /> Life Tracker</div>
           <h1>把生活的片段，<br /><span>好好收在一起。</span></h1>
           <p>旅行足迹、每一笔消费和突然闪过的念头，都能在几秒内记下。</p>
           <div className="feature-row">

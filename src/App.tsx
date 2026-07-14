@@ -10,6 +10,7 @@ import { Timeline } from "./components/Timeline";
 import { Planner } from "./components/Planner";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ProfileAvatar } from "./components/ProfileAvatar";
+import { BrandLogo } from "./components/BrandLogo";
 import { Onboarding, WhatsNew } from "./components/GuidanceOverlays";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
@@ -170,7 +171,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <button className="app-brand" onClick={() => setView("timeline")}><span><Sparkles size={17} /></span><b>Life Tracker</b></button>
+        <button className="app-brand" onClick={() => setView("timeline")}><BrandLogo className="header-brand-logo" /><b>Life Tracker</b></button>
         <nav className="desktop-nav" aria-label="主导航">
           <button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><ListFilter size={17} />记录</button>
           <button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><CalendarRange size={17} />行程规划</button>
@@ -216,7 +217,7 @@ export default function App() {
 }
 
 function LoadingScreen({ label }: { label: string }) {
-  return <div className="loading-screen"><span><Sparkles /></span><LoaderCircle className="spin" /><p>{label}</p></div>;
+  return <div className="loading-screen"><BrandLogo className="loading-brand-logo" /><LoaderCircle className="spin" /><p>{label}</p></div>;
 }
 
 function isVersionNewer(version: string, lastSeen: string | null) {

@@ -10,7 +10,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["apple-touch-icon.png", "pwa-180x180.png", "pwa-192x192.png", "pwa-512x512.png"],
+      includeAssets: ["life-tracker-logo-v112.png", "apple-touch-icon-v112.png", "pwa-192x192-v112.png", "pwa-512x512-v112.png"],
       manifest: {
         name: "Life Tracker",
         short_name: "Life Tracker",
@@ -22,10 +22,8 @@ export default defineConfig({
         scope: "/life-tracker-pwa/",
         lang: "zh-CN",
         icons: [
-          { src: "pwa-180x180.png", sizes: "180x180", type: "image/png" },
-          { src: "pwa-192x192.png", sizes: "192x192", type: "image/png" },
-          { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
-          { src: "pwa-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+          { src: "pwa-192x192-v112.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "pwa-512x512-v112.png", sizes: "512x512", type: "image/png", purpose: "any" }
         ]
       },
       workbox: {
