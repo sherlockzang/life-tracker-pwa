@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb";
-import type { ExchangeRate, LifeRecord, Trip, UserSettings } from "../types";
+import type { Changelog, ExchangeRate, LifeRecord, Trip, UserProfile, UserSettings } from "../types";
 
 export interface Snapshot {
   userId: string;
@@ -7,12 +7,14 @@ export interface Snapshot {
   trips: Trip[];
   rates: ExchangeRate[];
   settings: UserSettings;
+  profile: UserProfile;
+  changelogs: Changelog[];
   savedAt: string;
 }
 
 export interface PendingMutation {
   id: string;
-  table: "records" | "trips" | "user_settings" | "exchange_rates";
+  table: "records" | "trips" | "user_settings" | "exchange_rates" | "profiles";
   operation: "upsert" | "delete";
   payload: Record<string, unknown>;
   createdAt: string;

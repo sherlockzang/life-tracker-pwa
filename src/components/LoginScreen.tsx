@@ -63,9 +63,10 @@ export function LoginScreen() {
               <p className="form-hint">首次使用会自动创建账号，无需单独注册。</p>
             </form>
           )}
-          <div className="privacy-note"><ShieldCheck size={17} /><span>登录后你拥有独立的数据空间，所有记录仅自己可见。</span></div>
+          <div className="privacy-note"><ShieldCheck size={17} /><span>登录后，你将拥有完全独立的账号与数据空间——你的记录只有你自己能看到，不会与其他用户共享。</span></div>
         </div>
       </section>
+      <footer className="app-footer">© 2026 Sherlock Zang. 联系邮箱：sherlockzang8818@gmail.com</footer>
     </main>
   );
 }

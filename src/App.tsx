@@ -2,13 +2,15 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import type { Session } from "@supabase/supabase-js";
 import { CalendarRange, ChevronRight, CircleUserRound, Cloud, CloudOff, ListFilter, LoaderCircle, MapPinned, NotebookPen, Plane, Plus, ReceiptText, Route, Settings, Sparkles, WifiOff } from "lucide-react";
 import { supabase } from "./lib/supabase";
-import { cachedAppData, defaultSettings, fetchAppData, makeRecord, makeTrip, persistRecord, persistSettings, persistTrip, refreshRates, syncOutbox, updateCachedData, type AppData } from "./lib/data";
-import type { Currency, LifeRecord, RecordDraft, RecordType, TripDraft, UserSettings } from "./types";
+import { cachedAppData, defaultProfile, defaultSettings, fetchAppData, makeRecord, makeTrip, persistProfile, persistRecord, persistSettings, persistTrip, refreshRates, syncOutbox, updateCachedData, uploadAvatar, type AppData } from "./lib/data";
+import type { Currency, LifeRecord, RecordDraft, RecordType, TripDraft, UserProfile, UserSettings } from "./types";
 import { LoginScreen } from "./components/LoginScreen";
 import { QuickComposer } from "./components/QuickComposer";
 import { Timeline } from "./components/Timeline";
 import { Planner } from "./components/Planner";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ProfileAvatar } from "./components/ProfileAvatar";
+import { Onboarding, WhatsNew } from "./components/GuidanceOverlays";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -56,7 +58,7 @@ export default function App() {
         const fresh = await fetchAppData(user);
         if (!cancelled) setData(fresh);
       } catch (error) {
-        if (!cached && !cancelled) setData({ records: [], trips: [], rates: [], settings: defaultSettings(user.id) });
+        if (!cached && !cancelled) setData({ records: [], trips: [], rates: [], settings: defaultSettings(user.id), profile: defaultProfile(user), changelogs: [] });
         if (!cancelled) setLoadError(error instanceof Error ? error.message : "暂时无法读取云端数据");
       } finally {
         if (!cancelled) setLoading(false);
@@ -126,6 +128,14 @@ export default function App() {
     showToast("设置已保存");
   }
 
+  async function updateProfile(profile: UserProfile, avatar?: Blob, message = "资料已保存") {
+    if (!user) return;
+    const nextProfile = avatar ? { ...profile, avatar_url: await uploadAvatar(user, avatar), updated_at: new Date().toISOString() } : profile;
+    updateData((current) => ({ ...current, profile: nextProfile }));
+    await persistProfile(nextProfile);
+    if (message) showToast(message);
+  }
+
   async function handleRateRefresh() {
     if (!user || !data) return;
     const currencies = [...new Set(data.records.filter((record) => record.record_type === "expense" && record.currency).map((record) => record.currency as Currency))];
@@ -149,6 +159,9 @@ export default function App() {
   }, [data?.trips]);
 
   const currentDay = currentTrip ? Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(`${currentTrip.start_date}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
+  const pendingChangelog = data?.profile.has_seen_onboarding
+    ? data.changelogs.find((item) => isVersionNewer(item.version, data.profile.last_seen_version))
+    : undefined;
 
   if (!authReady) return <LoadingScreen label="正在打开你的记录空间" />;
   if (!user) return <LoginScreen />;
@@ -165,7 +178,7 @@ export default function App() {
         <div className="header-actions">
           <span className={`connection ${online ? "online" : "offline"}`}>{online ? <Cloud size={15} /> : <CloudOff size={15} />}{online ? "已同步" : "离线"}</span>
           <button className={`icon-button ${view === "settings" ? "active" : ""}`} aria-label="设置" onClick={() => setView("settings")}><Settings size={19} /></button>
-          <span className="mini-avatar">{user.email?.slice(0, 1).toUpperCase()}</span>
+          <ProfileAvatar profile={data.profile} className="mini-avatar" />
         </div>
       </header>
 
@@ -186,7 +199,7 @@ export default function App() {
           </>
         )}
         {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} onSaveTrip={saveTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
-        {view === "settings" && <SettingsPanel user={user} settings={data.settings} online={online} onUpdate={(settings) => void updateSettings(settings)} onSignOut={() => void supabase.auth.signOut()} />}
+        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} online={online} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onSignOut={() => void supabase.auth.signOut()} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
@@ -196,10 +209,23 @@ export default function App() {
 
       {toast && <div className="toast"><Sparkles size={15} />{toast}</div>}
       {loading && <div className="sync-loader"><LoaderCircle className="spin" size={14} />正在同步</div>}
+      {!data.profile.has_seen_onboarding && <Onboarding onComplete={() => updateProfile({ ...data.profile, has_seen_onboarding: true, updated_at: new Date().toISOString() }, undefined, "")} />}
+      {data.profile.has_seen_onboarding && pendingChangelog && <WhatsNew changelog={pendingChangelog} onDismiss={() => updateProfile({ ...data.profile, last_seen_version: pendingChangelog.version, updated_at: new Date().toISOString() }, undefined, "")} />}
     </div>
   );
 }
 
 function LoadingScreen({ label }: { label: string }) {
   return <div className="loading-screen"><span><Sparkles /></span><LoaderCircle className="spin" /><p>{label}</p></div>;
+}
+
+function isVersionNewer(version: string, lastSeen: string | null) {
+  if (!lastSeen) return true;
+  const current = version.split(".").map(Number);
+  const previous = lastSeen.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if ((current[index] || 0) > (previous[index] || 0)) return true;
+    if ((current[index] || 0) < (previous[index] || 0)) return false;
+  }
+  return false;
 }

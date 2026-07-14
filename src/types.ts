@@ -12,6 +12,24 @@ export interface UserSettings {
   updated_at: string;
 }
 
+export interface UserProfile {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  avatar_color: string;
+  has_seen_onboarding: boolean;
+  last_seen_version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Changelog {
+  id: string;
+  version: string;
+  summary: string[];
+  created_at: string;
+}
+
 export interface Trip {
   id: string;
   user_id: string;
@@ -97,12 +115,12 @@ export const CURRENCIES: { code: Currency; label: string; symbol: string }[] = [
 ];
 
 export const CATEGORY_META: Record<ExpenseCategory, { label: string; color: string }> = {
-  food: { label: "餐饮", color: "#ff9f6e" },
-  transport: { label: "交通", color: "#6dc9ff" },
-  shopping: { label: "购物", color: "#c69cff" },
-  stay: { label: "住宿", color: "#72dfba" },
-  entertainment: { label: "娱乐", color: "#ff82ad" },
-  other: { label: "其他", color: "#aab2c5" }
+  food: { label: "餐饮", color: "#0A84FF" },
+  transport: { label: "交通", color: "#8E8E93" },
+  shopping: { label: "购物", color: "#636366" },
+  stay: { label: "住宿", color: "#AEAEB2" },
+  entertainment: { label: "娱乐", color: "#48484A" },
+  other: { label: "其他", color: "#C7C7CC" }
 };
 
 export const nowLocalInput = () => {

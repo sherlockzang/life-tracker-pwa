@@ -7,7 +7,9 @@
 ## 已实现
 
 - Supabase Magic Link 邮箱登录，首次使用自动注册
-- 多用户数据隔离，四张业务表全部启用 RLS
+- 多用户数据隔离，所有用户数据表均启用 RLS
+- 昵称、首字母头像与 2MB 内自定义头像上传
+- 新用户首次引导，以及按账号记录已读状态的版本更新提示
 - 消费 / 行程 / 随记统一快速输入和时间线筛选
 - 13 种币种、自动汇率缓存、分类占比和每日趋势图
 - 多行程管理、按日期动态生成 Day、拖拽排序与跨天移动
@@ -45,10 +47,11 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
 
 Publishable Key 会随静态前端发布，这是 Supabase 的预期用法；真正的数据安全由 RLS 保证。不要把 `service_role` key 放进前端或 GitHub 仓库。
 
-数据库初始化步骤见 [`supabase/README.md`](supabase/README.md)。完整迁移文件位于：
+数据库初始化步骤见 [`supabase/README.md`](supabase/README.md)。迁移文件按文件名顺序执行：
 
 ```text
 supabase/migrations/20260714000000_initial_schema.sql
+supabase/migrations/20260714010000_profiles_changelogs.sql
 ```
 
 ### 数据表
@@ -57,6 +60,8 @@ supabase/migrations/20260714000000_initial_schema.sql
 - `trips`：行程名称、目的地、日期和时区
 - `records`：消费、行程、随记统一记录；通过 `parent_plan_id` 关联实际执行记录
 - `exchange_rates`：API 或手动汇率快照
+- `profiles`：昵称、头像、首次引导和版本已读状态
+- `changelogs`：面向用户展示的版本更新说明
 
 `day_number` 不存入数据库，而是根据行程时区、`trips.start_date` 和 `records.event_at` 动态计算。
 
@@ -83,5 +88,7 @@ src/types.ts          共享类型和字段元数据
 supabase/migrations/  数据库迁移与 RLS
 public/                PWA 图标和分享预览图
 ```
+
+每次发布新需求前先确认版本号，再将普通用户可读的更新摘要写入 `changelogs` 并部署。
 
 汇率使用无密钥的 Frankfurter API；如果网络不可用，统计会继续使用 IndexedDB 和 Supabase 中最近一次缓存的汇率。

@@ -1,13 +1,16 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { listMutations, loadSnapshot, queueMutation, removeMutation, saveSnapshot } from "./offline";
-import type { Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, TripDraft, UserSettings } from "../types";
+import type { Changelog, Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, TripDraft, UserProfile, UserSettings } from "../types";
+import { APP_VERSION } from "../version";
 
 export interface AppData {
   records: LifeRecord[];
   trips: Trip[];
   rates: ExchangeRate[];
   settings: UserSettings;
+  profile: UserProfile;
+  changelogs: Changelog[];
 }
 
 const now = () => new Date().toISOString();
@@ -18,6 +21,21 @@ export function defaultSettings(userId: string): UserSettings {
     user_id: userId,
     base_currency: "USD",
     theme: "system",
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+}
+
+export function defaultProfile(user: User): UserProfile {
+  const timestamp = now();
+  const metadataName = user.user_metadata?.display_name || user.user_metadata?.full_name || user.user_metadata?.name;
+  return {
+    user_id: user.id,
+    display_name: String(metadataName || user.email?.split("@")[0] || "Life Tracker 用户").slice(0, 40),
+    avatar_url: null,
+    avatar_color: "#0A84FF",
+    has_seen_onboarding: false,
+    last_seen_version: APP_VERSION,
     created_at: timestamp,
     updated_at: timestamp
   };
@@ -35,24 +53,30 @@ const normalizeRate = (row: Record<string, unknown>): ExchangeRate => ({
 });
 
 export async function fetchAppData(user: User): Promise<AppData> {
-  const [recordsResult, tripsResult, settingsResult, ratesResult] = await Promise.all([
+  const [recordsResult, tripsResult, settingsResult, ratesResult, profileResult, changelogsResult] = await Promise.all([
     supabase.from("records").select("*").order("event_at", { ascending: false }),
     supabase.from("trips").select("*").is("archived_at", null).order("start_date", { ascending: false }),
     supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle(),
-    supabase.from("exchange_rates").select("*").order("rate_date", { ascending: false })
+    supabase.from("exchange_rates").select("*").order("rate_date", { ascending: false }),
+    supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle(),
+    supabase.from("changelogs").select("*").order("created_at", { ascending: false })
   ]);
 
-  const firstError = recordsResult.error || tripsResult.error || settingsResult.error || ratesResult.error;
+  const firstError = recordsResult.error || tripsResult.error || settingsResult.error || ratesResult.error || profileResult.error || changelogsResult.error;
   if (firstError) throw firstError;
 
   const settings = (settingsResult.data as UserSettings | null) || defaultSettings(user.id);
   if (!settingsResult.data) await supabase.from("user_settings").upsert(settings);
+  const profile = (profileResult.data as UserProfile | null) || defaultProfile(user);
+  if (!profileResult.data) await supabase.from("profiles").upsert(profile);
 
   const data: AppData = {
     records: (recordsResult.data || []).map((row) => normalizeRecord(row)),
     trips: (tripsResult.data || []) as Trip[],
     settings,
-    rates: (ratesResult.data || []).map((row) => normalizeRate(row))
+    rates: (ratesResult.data || []).map((row) => normalizeRate(row)),
+    profile,
+    changelogs: (changelogsResult.data || []) as Changelog[]
   };
   await saveSnapshot({ userId: user.id, ...data, savedAt: now() });
   return data;
@@ -61,10 +85,17 @@ export async function fetchAppData(user: User): Promise<AppData> {
 export async function cachedAppData(user: User): Promise<AppData | null> {
   const cached = await loadSnapshot(user.id);
   if (!cached) return null;
-  return { records: cached.records, trips: cached.trips, rates: cached.rates, settings: cached.settings };
+  return {
+    records: cached.records,
+    trips: cached.trips,
+    rates: cached.rates,
+    settings: cached.settings,
+    profile: cached.profile || defaultProfile(user),
+    changelogs: cached.changelogs || []
+  };
 }
 
-async function upsertOrQueue(table: "records" | "trips" | "user_settings" | "exchange_rates", payload: Record<string, unknown>) {
+async function upsertOrQueue(table: "records" | "trips" | "user_settings" | "exchange_rates" | "profiles", payload: Record<string, unknown>) {
   if (navigator.onLine) {
     const { error } = await supabase.from(table).upsert(payload);
     if (!error) return;
@@ -136,6 +167,23 @@ export async function persistTrip(trip: Trip) {
 
 export async function persistSettings(settings: UserSettings) {
   await upsertOrQueue("user_settings", settings as unknown as Record<string, unknown>);
+}
+
+export async function persistProfile(profile: UserProfile) {
+  await upsertOrQueue("profiles", profile as unknown as Record<string, unknown>);
+}
+
+export async function uploadAvatar(user: User, avatar: Blob) {
+  if (!navigator.onLine) throw new Error("上传头像时需要连接网络");
+  const path = `${user.id}/avatar.webp`;
+  const { error } = await supabase.storage.from("avatars").upload(path, avatar, {
+    contentType: "image/webp",
+    cacheControl: "3600",
+    upsert: true
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 export async function persistRates(rates: ExchangeRate[]) {
