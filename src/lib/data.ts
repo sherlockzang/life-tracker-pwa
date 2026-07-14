@@ -49,6 +49,12 @@ const normalizeRecord = (row: Record<string, unknown>): LifeRecord => {
     ...(row as unknown as LifeRecord),
     amount: row.amount == null ? null : Number(row.amount),
     sort_order: row.sort_order == null ? null : Number(row.sort_order),
+    actual_match_status: (row.actual_match_status || "never") as LifeRecord["actual_match_status"],
+    actual_info: (row.actual_info || null) as LifeRecord["actual_info"],
+    actual_info_matched: Boolean(row.actual_info_matched),
+    actual_matched_at: typeof row.actual_matched_at === "string" ? row.actual_matched_at : null,
+    actual_match_provider: typeof row.actual_match_provider === "string" ? row.actual_match_provider : null,
+    actual_match_request_id: typeof row.actual_match_request_id === "string" ? row.actual_match_request_id : null,
     ...transport
   };
 };
@@ -143,6 +149,12 @@ export function makeRecord(user: User, draft: RecordDraft): LifeRecord {
     parent_plan_id: draft.parent_plan_id || null,
     transport_type: draft.transport_type ?? null,
     transport_details: draft.transport_details ?? null,
+    actual_match_status: "never",
+    actual_info: null,
+    actual_info_matched: false,
+    actual_matched_at: null,
+    actual_match_provider: null,
+    actual_match_request_id: null,
     image_path: null,
     created_at: timestamp,
     updated_at: timestamp
@@ -200,7 +212,7 @@ export async function persistRates(rates: ExchangeRate[]) {
   }
 }
 
-export async function refreshRates(user: User, quote: Currency, currencies: Currency[]) {
+export async function refreshRates(user: User, quote: Currency, currencies: Currency[], persist = true) {
   const unique = [...new Set(currencies.filter((currency) => currency !== quote))];
   const fetched = await Promise.all(unique.map(async (base) => {
     const response = await fetch(`https://api.frankfurter.dev/v2/rate/${base}/${quote}`);
@@ -219,7 +231,7 @@ export async function refreshRates(user: User, quote: Currency, currencies: Curr
       updated_at: timestamp
     } satisfies ExchangeRate;
   }));
-  await persistRates(fetched);
+  if (persist) await persistRates(fetched);
   return fetched;
 }
 

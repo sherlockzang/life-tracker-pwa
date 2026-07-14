@@ -24,9 +24,9 @@ npx supabase secrets set AVIATIONSTACK_API_KEY=你的密钥 --project-ref ihqkgt
 npx supabase functions deploy lookup-flight --project-ref ihqkgtmikwdakhyglels
 ```
 
-网站只会在用户输入航班号并主动点击“自动获取航班信息”时调用接口。返回的候选航班需要确认后才会填入表单，避免误用数据和无意消耗月度额度。
+未来航班只保存手动计划信息，不调用 Aviationstack。系统会按计划到达日期、当地时间和 IANA 时区换算 UTC；到达约一小时后至 48 小时内，用户可主动点击“匹配实际飞行信息”。服务端会重新读取用户记录并严格核对航班号、出发日期及起降机场，返回计划/实际对比预览，用户确认后才会保存。
 
-## DeepSeek 路线查询
+## DeepSeek 智能助手
 
 API Key 只保存在 Supabase Edge Function 的服务端环境中，绝不能写进 `VITE_*` 变量、前端源码或 GitHub 仓库。
 
@@ -47,12 +47,12 @@ API Key 只保存在 Supabase Edge Function 的服务端环境中，绝不能写
 
 ### 3. 部署 Edge Function
 
-仓库已包含 `supabase/functions/query-transit-route/index.ts`。可在项目根目录执行：
+仓库以通用 `deepseek-assist` 函数承载路线查询、记账解析、随记润色、旅行回顾与每日摘要；旧的 `query-transit-route` 仅作为向后兼容入口。可在项目根目录执行：
 
 ```bash
 npx supabase login
 npx supabase link --project-ref ihqkgtmikwdakhyglels
-npx supabase functions deploy query-transit-route --project-ref ihqkgtmikwdakhyglels
+npx supabase functions deploy deepseek-assist query-transit-route --project-ref ihqkgtmikwdakhyglels
 ```
 
 检查 Secret 是否存在：
@@ -61,14 +61,26 @@ npx supabase functions deploy query-transit-route --project-ref ihqkgtmikwdakhyg
 npx supabase secrets list --project-ref ihqkgtmikwdakhyglels
 ```
 
-也可以通过 Dashboard 的 Edge Functions 编辑器创建或更新 `query-transit-route`，但应以仓库内代码为准，避免线上代码和版本记录不一致。
+也可以通过 Dashboard 的 Edge Functions 编辑器查看已部署函数，但应以仓库内代码为准，避免线上代码和版本记录不一致。
 
 ### 4. 本地测试（选做）
 
 复制 `supabase/.env.example` 为一个不会提交的本地文件，例如 `supabase/.env.local`，填入真实 Key 后运行：
 
 ```bash
-npx supabase functions serve query-transit-route --env-file supabase/.env.local
+npx supabase functions serve deepseek-assist --env-file supabase/.env.local
 ```
 
-AI 查询需要先登录 Life Tracker。函数会验证用户登录状态，限制请求长度和响应长度，并在 DeepSeek 不可用时让前端回退为手动填写。
+正式账号需要先登录 Life Tracker；演示模式使用按设备延续的短期服务端会话。函数会验证身份、执行原子配额和频率保护、限制输入输出长度，并在 DeepSeek 不可用时让前端回退为手动填写。旅行回顾会先在服务端汇总消费与地点，并最多抽样 20 条随记，不会把整段原始行程直接发送给模型。
+
+## v1.3.0 Edge Functions
+
+```bash
+npx supabase functions deploy deepseek-assist start-demo-session redeem-invite get-api-quota lookup-flight query-transit-route --project-ref ihqkgtmikwdakhyglels
+```
+
+- `deepseek-assist`：统一 AI action 分发、固定 system prompt、额度与缓存
+- `start-demo-session`：生成并轮换按设备延续的演示 token
+- `redeem-invite`：服务端散列验证与 Friend 权限兑换
+- `get-api-quota`：返回当前账号可展示的额度快照
+- `lookup-flight`：完成时间校验、精确匹配、并发锁和预览确认

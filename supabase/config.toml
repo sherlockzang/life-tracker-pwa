@@ -5,3 +5,15 @@ verify_jwt = true
 
 [functions.lookup-flight]
 verify_jwt = true
+
+[functions.deepseek-assist]
+verify_jwt = false
+
+[functions.start-demo-session]
+verify_jwt = false
+
+[functions.redeem-invite]
+verify_jwt = true
+
+[functions.get-api-quota]
+verify_jwt = true

@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Mail, MapPinned, NotebookPen, ReceiptText, ShieldCheck } from "lucide-react";
+import { ArrowRight, FlaskConical, Mail, MapPinned, NotebookPen, ReceiptText, ShieldCheck, Sparkles } from "lucide-react";
 import { magicLinkRedirect, supabase } from "../lib/supabase";
 import { BrandLogo } from "./BrandLogo";
 
-export function LoginScreen() {
+export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> }) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [error, setError] = useState("");
+  const [demoLoading, setDemoLoading] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -62,8 +63,10 @@ export function LoginScreen() {
                 {status === "sending" ? "正在发送…" : "发送登录链接"}<ArrowRight size={18} />
               </button>
               <p className="form-hint">首次使用会自动创建账号，无需单独注册。</p>
+              <div className="login-limits"><Sparkles size={15} /><p>普通账号：航班实际信息每天 2 次，路线查询、记账识别与随记润色每天共用 15 次。朋友邀请码可在登录后于设置中兑换，记录与手动规划不受额度限制。</p></div>
             </form>
           )}
+          <div className="demo-entry"><span>或者先看看完整功能</span><button className="secondary-button full" disabled={demoLoading} onClick={async () => { setDemoLoading(true); setError(""); try { await onStartDemo(); } catch (demoError) { setError(demoError instanceof Error ? demoError.message : "暂时无法进入演示模式"); } finally { setDemoLoading(false); } }}><FlaskConical size={17} />{demoLoading ? "正在准备演示…" : "进入演示模式"}</button><small>无需邮箱。数据只保存在当前设备；航班使用模拟信息，AI 每台设备每天可体验 2 次。</small></div>
           <div className="privacy-note"><ShieldCheck size={17} /><span>登录后，你将拥有完全独立的账号与数据空间——你的记录只有你自己能看到，不会与其他用户共享。</span></div>
         </div>
       </section>

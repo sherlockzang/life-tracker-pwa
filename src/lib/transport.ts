@@ -23,8 +23,8 @@ export function normalizeTransportDetails(type: TransportType, value: unknown): 
     return {
       airline: stringValue(value.airline),
       flight_number: stringValue(value.flight_number),
-      departure: { date: stringValue(departure.date), time: stringValue(departure.time), airport: stringValue(departure.airport), terminal: stringValue(departure.terminal), timezone: stringValue(departure.timezone) || undefined },
-      arrival: { date: stringValue(arrival.date), time: stringValue(arrival.time), airport: stringValue(arrival.airport), terminal: stringValue(arrival.terminal), timezone: stringValue(arrival.timezone) || undefined },
+      departure: { date: stringValue(departure.date), time: stringValue(departure.time), airport: stringValue(departure.airport), iata: stringValue(departure.iata) || undefined, terminal: stringValue(departure.terminal), timezone: stringValue(departure.timezone) || undefined },
+      arrival: { date: stringValue(arrival.date), time: stringValue(arrival.time), airport: stringValue(arrival.airport), iata: stringValue(arrival.iata) || undefined, terminal: stringValue(arrival.terminal), timezone: stringValue(arrival.timezone) || undefined },
       gate: stringValue(value.gate) || undefined,
       registration: stringValue(value.registration) || undefined,
       seat: stringValue(value.seat) || undefined,

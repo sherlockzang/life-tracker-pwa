@@ -12,6 +12,10 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { ProfileAvatar } from "./components/ProfileAvatar";
 import { BrandLogo } from "./components/BrandLogo";
 import { Onboarding, WhatsNew } from "./components/GuidanceOverlays";
+import { DEMO_USER, loadDemoData, resetDemoData, saveDemoData } from "./lib/demo";
+import { startDemoSession } from "./lib/account";
+import { generateDailySummary } from "./lib/ai";
+import { dateInZone } from "./lib/tripDates";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -27,6 +31,7 @@ const filters: { value: Filter; label: string; icon: typeof Sparkles }[] = [
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [demoMode, setDemoMode] = useState(() => localStorage.getItem("life-tracker-demo-active") === "true");
   const [authReady, setAuthReady] = useState(false);
   const [data, setData] = useState<AppData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,17 +43,26 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   const [plannerTripId, setPlannerTripId] = useState<string | undefined>();
+  const [dailySummary, setDailySummary] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: authData }) => { setSession(authData.session); setAuthReady(true); });
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => { setSession(nextSession); setAuthReady(true); });
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      setSession(nextSession);
+      if (nextSession && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+        localStorage.removeItem("life-tracker-demo-active");
+        setDemoMode(false);
+      }
+      setAuthReady(true);
+    });
     return () => subscription.subscription.unsubscribe();
   }, []);
 
-  const user = session?.user || null;
+  const user = demoMode ? DEMO_USER : session?.user || null;
 
   useEffect(() => {
     if (!user) { setData(null); return; }
+    if (demoMode) { setData(loadDemoData()); setLoading(false); setLoadError(""); return; }
     let cancelled = false;
     setLoading(true); setLoadError("");
     void (async () => {
@@ -66,7 +80,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, demoMode]);
 
   useEffect(() => {
     const onOnline = async () => {
@@ -96,44 +110,51 @@ export default function App() {
     setData((current) => {
       if (!current || !user) return current;
       const next = recipe(current);
-      void updateCachedData(user.id, next);
+      if (demoMode) saveDemoData(next);
+      else void updateCachedData(user.id, next);
       return next;
     });
-  }, [user]);
+  }, [user, demoMode]);
 
   async function saveRecord(draft: RecordDraft) {
     if (!user || !data) return;
     const record = makeRecord(user, draft);
     updateData((current) => ({ ...current, records: [record, ...current.records] }));
-    await persistRecord(record);
+    if (!demoMode) await persistRecord(record);
     showToast(online ? "已记下来" : "已离线保存，联网后同步");
   }
 
   async function updateRecord(record: LifeRecord) {
     updateData((current) => ({ ...current, records: current.records.map((item) => item.id === record.id ? record : item) }));
-    await persistRecord(record);
+    if (!demoMode) await persistRecord(record);
   }
 
   async function saveTrip(draft: TripDraft) {
     if (!user) throw new Error("尚未登录");
     const trip = makeTrip(user, draft);
     updateData((current) => ({ ...current, trips: [trip, ...current.trips] }));
-    await persistTrip(trip);
+    if (!demoMode) await persistTrip(trip);
     showToast("行程已创建");
     return trip;
   }
 
+  async function updateTrip(trip: ReturnType<typeof makeTrip>) {
+    updateData((current) => ({ ...current, trips: current.trips.map((item) => item.id === trip.id ? trip : item) }));
+    if (!demoMode) await persistTrip(trip);
+    showToast("行程已更新");
+  }
+
   async function updateSettings(settings: UserSettings) {
     updateData((current) => ({ ...current, settings }));
-    await persistSettings(settings);
+    if (!demoMode) await persistSettings(settings);
     showToast("设置已保存");
   }
 
   async function updateProfile(profile: UserProfile, avatar?: Blob, message = "资料已保存") {
     if (!user) return;
-    const nextProfile = avatar ? { ...profile, avatar_url: await uploadAvatar(user, avatar), updated_at: new Date().toISOString() } : profile;
+    const nextProfile = avatar && !demoMode ? { ...profile, avatar_url: await uploadAvatar(user, avatar), updated_at: new Date().toISOString() } : profile;
     updateData((current) => ({ ...current, profile: nextProfile }));
-    await persistProfile(nextProfile);
+    if (!demoMode) await persistProfile(nextProfile);
     if (message) showToast(message);
   }
 
@@ -143,7 +164,7 @@ export default function App() {
     if (!currencies.length) { showToast("先记一笔外币消费吧"); return; }
     setRefreshingRates(true);
     try {
-      const fetched = await refreshRates(user, data.settings.base_currency, currencies);
+      const fetched = await refreshRates(user, data.settings.base_currency, currencies, !demoMode);
       const keys = new Set(fetched.map((rate) => `${rate.base_currency}:${rate.quote_currency}`));
       updateData((current) => ({ ...current, rates: [...fetched, ...current.rates.filter((rate) => !keys.has(`${rate.base_currency}:${rate.quote_currency}`))] }));
       showToast("汇率已更新");
@@ -159,13 +180,23 @@ export default function App() {
     return data?.trips.find((trip) => trip.start_date <= today && trip.end_date >= today);
   }, [data?.trips]);
 
+  useEffect(() => {
+    if (!data || !currentTrip || demoMode || !online || dailySummary) return;
+    const today = dateInZone(new Date().toISOString(), currentTrip.timezone);
+    const hasPlans = data.records.some((record) => record.trip_id === currentTrip.id && record.record_type === "trip" && record.plan_status === "planned" && dateInZone(record.event_at, currentTrip.timezone) === today);
+    if (!hasPlans) return;
+    let cancelled = false;
+    void generateDailySummary().then((result) => { if (!cancelled && !result.skipped && result.result) setDailySummary(result.result); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [currentTrip, dailySummary, data, demoMode, online]);
+
   const currentDay = currentTrip ? Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(`${currentTrip.start_date}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
   const pendingChangelog = data?.profile.has_seen_onboarding
     ? data.changelogs.find((item) => isVersionNewer(item.version, data.profile.last_seen_version))
     : undefined;
 
   if (!authReady) return <LoadingScreen label="正在打开你的记录空间" />;
-  if (!user) return <LoginScreen />;
+  if (!user) return <LoginScreen onStartDemo={async () => { await startDemoSession(); localStorage.setItem("life-tracker-demo-active", "true"); setDemoMode(true); setData(loadDemoData()); }} />;
   if (!data) return <LoadingScreen label="正在整理你的时间线" />;
 
   return (
@@ -177,7 +208,7 @@ export default function App() {
           <button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><CalendarRange size={17} />行程规划</button>
         </nav>
         <div className="header-actions">
-          <span className={`connection ${online ? "online" : "offline"}`}>{online ? <Cloud size={15} /> : <CloudOff size={15} />}{online ? "已同步" : "离线"}</span>
+          <span className={`connection ${online ? "online" : "offline"}`}>{online ? <Cloud size={15} /> : <CloudOff size={15} />}{demoMode ? "本地演示" : online ? "已同步" : "离线"}</span>
           <button className={`icon-button ${view === "settings" ? "active" : ""}`} aria-label="设置" onClick={() => setView("settings")}><Settings size={19} /></button>
           <ProfileAvatar profile={data.profile} className="mini-avatar" />
         </div>
@@ -189,8 +220,8 @@ export default function App() {
       <main className="app-main">
         {view === "timeline" && (
           <>
-            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{currentTrip.destination}，今天也去留下一点什么吧。</p></div><ChevronRight /></button>}
-            <QuickComposer trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} />
+            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{dailySummary || `${currentTrip.destination}，今天也去留下一点什么吧。`}</p></div><ChevronRight /></button>}
+            <QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} />
             <div className="filter-row">
               <div className="filter-tabs" role="tablist">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
               <button className="planner-link" onClick={() => setView("planner")}><MapPinned size={16} />行程规划<ChevronRight size={15} /></button>
@@ -199,12 +230,12 @@ export default function App() {
             <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() })} />
           </>
         )}
-        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} onSaveTrip={saveTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
-        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onSignOut={() => void supabase.auth.signOut()} />}
+        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
+        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} isDemo={demoMode} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onResetDemo={() => { const next = resetDemoData(); setData(next); showToast("演示数据已重置"); }} onSignOut={() => { if (demoMode) { localStorage.removeItem("life-tracker-demo-active"); setDemoMode(false); setData(null); } else void supabase.auth.signOut(); }} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
-      {composerOpen && <div className="composer-modal"><div className="composer-modal-inner"><QuickComposer compact trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} onClose={() => setComposerOpen(false)} /></div></div>}
+      {composerOpen && <div className="composer-modal"><div className="composer-modal-inner"><QuickComposer compact isDemo={demoMode} trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} onClose={() => setComposerOpen(false)} /></div></div>}
 
       <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
 

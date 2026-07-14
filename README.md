@@ -14,11 +14,13 @@
 - 网站品牌、Safari 桌面图标、PWA 图标和分享预览统一使用正式正方形 Logo
 - 消费 / 行程 / 随记统一快速输入和时间线筛选
 - 13 种币种、自动汇率缓存、分类占比和每日趋势图
-- 多行程管理、按日期动态生成 Day、拖拽排序与跨天移动
+- 多行程管理、按日期动态生成 Day、按时间排序、跨天移动与行程二次编辑
 - 飞机、高铁和地铁结构化交通模板，以及交通计划智能摘要
-- Aviationstack 实时航班查询、候选航班确认填入和起降地当地时区
+- 离线机场补全、计划/实际航班分离，以及到达后 Aviationstack 实际信息匹配
 - 新行程目的地时区自动匹配，以及标准 IANA 时区选择
-- DeepSeek 路线查询预览与确认填入，API Key 仅保存在 Supabase Edge Function
+- DeepSeek 路线查询、记账解析、随记润色、旅行回顾与今日摘要，全部采用预览确认或服务端缓存
+- Standard / Friend / Owner 权限、固定邀请码、服务端原子配额、共享额度池与频率保护
+- 无需邮箱的本地演示模式；航班使用模拟数据，DeepSeek 按设备限制每日体验次数
 - 计划状态打卡，以及“计划 → 实际消费/随记”的父子结构
 - 以 iPhone 17 Pro 为主的灵动岛安全区域与 PWA 适配
 - 设置页提供长期保留的致谢栏目
@@ -64,6 +66,8 @@ supabase/migrations/20260714020000_release_1_1_1.sql
 supabase/migrations/20260714030000_release_1_1_2.sql
 supabase/migrations/20260714040000_release_1_2_0_transport.sql
 supabase/migrations/20260714050000_release_1_2_1_flight_lookup.sql
+supabase/migrations/20260714060000_release_1_3_0_security_and_ai.sql
+supabase/migrations/20260714061000_release_1_3_0_demo_device_session.sql
 ```
 
 ### 数据表
@@ -74,6 +78,10 @@ supabase/migrations/20260714050000_release_1_2_1_flight_lookup.sql
 - `exchange_rates`：API 或手动汇率快照
 - `profiles`：昵称、头像、首次引导和版本已读状态
 - `changelogs`：面向用户展示的版本更新说明
+- `api_entitlements`、`api_quota_buckets`、`api_usage_events`：服务端账号权限与原子配额审计
+- `invite_codes`、`invite_redemptions`：仅保存散列的邀请码与兑换关系
+- `demo_sessions`：按设备延续的短期演示会话
+- `trip_recaps`、`daily_summaries`：已生成的旅行回顾和每日摘要缓存
 
 `day_number` 不存入数据库，而是根据行程时区、`trips.start_date` 和 `records.event_at` 动态计算。
 

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
+import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, KeyRound, LoaderCircle, LogOut, Mail, Moon, Palette, Pencil, RefreshCcw, ShieldCheck, Smartphone, Sparkles, Sun, WalletCards, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
-import type { Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
+import type { ApiQuotaSnapshot, Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
 import { CURRENCIES } from "../types";
 import { APP_VERSION } from "../version";
 import { ProfileAvatar } from "./ProfileAvatar";
+import { generateDailySummary } from "../lib/ai";
+import { getApiQuota, redeemInvite } from "../lib/account";
 
 interface Props {
   user: User;
@@ -15,15 +17,44 @@ interface Props {
   onUpdate: (settings: UserSettings) => void;
   onUpdateProfile: (profile: UserProfile, avatar?: Blob) => Promise<void>;
   onSignOut: () => void;
+  isDemo?: boolean;
+  onResetDemo?: () => void;
 }
 
 const AVATAR_COLORS = ["#0A84FF", "#1C1C1E", "#3A3A3C", "#636366", "#8E8E93", "#D1D1D6"];
 
-export function SettingsPanel({ user, settings, profile, changelogs, online, onUpdate, onUpdateProfile, onSignOut }: Props) {
+export function SettingsPanel({ user, settings, profile, changelogs, online, onUpdate, onUpdateProfile, onSignOut, isDemo = false, onResetDemo }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [showingReleaseHistory, setShowingReleaseHistory] = useState(false);
   const [showingUsageGuide, setShowingUsageGuide] = useState(false);
+  const [quota, setQuota] = useState<ApiQuotaSnapshot | null>(null);
+  const [quotaError, setQuotaError] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [summary, setSummary] = useState("");
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const update = (patch: Partial<UserSettings>) => onUpdate({ ...settings, ...patch, updated_at: new Date().toISOString() });
+
+  useEffect(() => {
+    if (isDemo) return;
+    void getApiQuota().then(setQuota).catch((error) => setQuotaError(error instanceof Error ? error.message : "暂时无法读取额度"));
+  }, [isDemo]);
+
+  async function submitInvite(event: FormEvent) {
+    event.preventDefault(); if (!inviteCode.trim()) return;
+    setInviteLoading(true); setInviteMessage("");
+    try { const result = await redeemInvite(inviteCode); setInviteMessage(result.tier === "owner" ? "当前账号已是 Owner" : "邀请码已兑换，朋友权限已生效"); setInviteCode(""); setQuota(await getApiQuota()); }
+    catch (error) { setInviteMessage(error instanceof Error ? error.message : "邀请码验证失败"); }
+    finally { setInviteLoading(false); }
+  }
+
+  async function loadDailySummary() {
+    setSummaryLoading(true); setSummary("");
+    try { const result = await generateDailySummary(); setSummary(result.skipped ? "今天没有待进行的行程计划，不会调用 AI。" : result.result); }
+    catch (error) { setSummary(error instanceof Error ? error.message : "今日摘要暂时不可用"); }
+    finally { setSummaryLoading(false); }
+  }
 
   return (
     <section className="settings-page">
@@ -39,10 +70,20 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             <div className="theme-options">{([{"value":"system","label":"跟随系统","icon":Smartphone},{"value":"dark","label":"深色","icon":Moon},{"value":"light","label":"浅色","icon":Sun}] as const).map((item) => { const Icon = item.icon; return <button className={settings.theme === item.value ? "active" : ""} onClick={() => update({ theme: item.value as ThemeMode })} key={item.value}><Icon /><span>{item.label}</span>{settings.theme === item.value && <Check size={16} />}</button>; })}</div>
           </section>
           <section className="settings-card glass-card">
-            <button className="settings-row"><span className="settings-icon coral"><Bell /></span><div><b>行程提醒</b><small>即将到来的计划与每日摘要</small></div><em>稍后开放</em><ChevronRight /></button>
+            <button className="settings-row" disabled={isDemo || summaryLoading} onClick={() => void loadDailySummary()}><span className="settings-icon coral"><Bell /></span><div><b>今日计划摘要</b><small>{isDemo ? "演示模式暂不开放" : "当天首次打开时按需生成并缓存"}</small></div>{summaryLoading ? <LoaderCircle className="spin" /> : <ChevronRight />}</button>
+            {summary && <div className="daily-summary"><Sparkles size={16} /><p>{summary}</p></div>}
             <button className="settings-row" onClick={() => setShowingUsageGuide(true)}><span className="settings-icon violet"><BookOpen /></span><div><b>使用说明</b><small>快速记录、交通模板与 AI 路线查询</small></div><ChevronRight /></button>
             <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
             <button className="settings-row"><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
+          </section>
+          <section className="settings-card glass-card smart-service-card">
+            <header><span className="settings-icon violet"><Bot /></span><div><h2>智能服务与权限</h2><p>额度按北京时间重置，记录与手动编辑始终不受影响</p></div></header>
+            <div className="tier-heading"><span>{isDemo ? "Demo" : quota ? ({ standard: "Standard", friend: "Friend", owner: "Owner" } as const)[quota.tier] : "正在读取…"}</span><small>{isDemo ? "AI 每台设备每天 2 次；航班使用模拟数据" : tierDescription(quota?.tier)}</small></div>
+            {!isDemo && quota && <QuotaOverview quota={quota} />}
+            {quotaError && <p className="field-error">{quotaError}</p>}
+            {!isDemo && quota?.tier === "standard" && <form className="invite-form" onSubmit={submitInvite}><label><KeyRound size={15} /><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="输入朋友邀请码" autoComplete="off" /></label><button className="secondary-button" disabled={inviteLoading || !inviteCode.trim()}>{inviteLoading ? "验证中…" : "兑换"}</button></form>}
+            {inviteMessage && <p className="invite-message">{inviteMessage}</p>}
+            {isDemo && <button className="secondary-button reset-demo-button" onClick={onResetDemo}><RefreshCcw size={15} />重置演示数据</button>}
           </section>
           <section className="settings-card glass-card credits-card" aria-labelledby="credits-title">
             <header><span className="settings-icon blue"><HeartHandshake /></span><div><h2 id="credits-title">致谢</h2><p>感谢参与这个长期个人记录工具的伙伴</p></div></header>
@@ -56,16 +97,28 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             <span className="edit-profile-link"><Pencil size={13} />编辑资料</span>
           </button>
           <p><Mail size={14} />{user.email}</p>
-          <div className={`sync-state ${online ? "online" : "offline"}`}><Cloud size={17} /><span><b>{online ? "云端已连接" : "离线模式"}</b><small>{online ? "记录会自动同步" : "恢复网络后自动同步"}</small></span></div>
-          <button className="signout-button" onClick={onSignOut}><LogOut size={17} />退出登录</button>
+          <div className={`sync-state ${online ? "online" : "offline"}`}><Cloud size={17} /><span><b>{isDemo ? "本地演示模式" : online ? "云端已连接" : "离线模式"}</b><small>{isDemo ? "不会读取或写入真实账号数据" : online ? "记录会自动同步" : "恢复网络后自动同步"}</small></span></div>
+          <button className="signout-button" onClick={onSignOut}><LogOut size={17} />{isDemo ? "退出演示" : "退出登录"}</button>
         </aside>
       </div>
       <footer className="app-footer settings-footer"><span>版本 {APP_VERSION}</span><span>© 2026 Sherlock Zang. 联系邮箱：sherlockzang8818@gmail.com</span></footer>
-      {editingProfile && <ProfileEditor profile={profile} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
+      {editingProfile && <ProfileEditor profile={profile} isDemo={isDemo} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
       {showingUsageGuide && <UsageGuide onClose={() => setShowingUsageGuide(false)} />}
       {showingReleaseHistory && <ReleaseHistory changelogs={changelogs} onClose={() => setShowingReleaseHistory(false)} />}
     </section>
   );
+}
+
+function tierDescription(tier?: ApiQuotaSnapshot["tier"]) {
+  if (tier === "owner") return "独立航班额度；AI 不计入共享池，并保留防故障软上限";
+  if (tier === "friend") return "无个人日限额，仍受共享池与频率保护";
+  return "航班每天 2 次；轻量 AI 助手每天共用 15 次";
+}
+
+function QuotaOverview({ quota }: { quota: ApiQuotaSnapshot }) {
+  const own = quota.buckets.filter((bucket) => bucket.bucket_key.includes(":standard:") || bucket.bucket_key.includes(":owner:") || bucket.bucket_key.includes(":recap:"));
+  const shared = quota.buckets.filter((bucket) => bucket.bucket_key.includes(":shared:"));
+  return <div className="quota-overview"><div><b>个人额度</b>{own.length ? own.map((bucket) => <span key={bucket.bucket_key}>{bucket.used_value} / {bucket.limit_value}<small>{bucket.bucket_key.includes("aviation") ? "航班" : bucket.bucket_key.includes("recap") ? "旅行回顾" : "轻量 AI"}</small></span>) : <p>当前账号没有个人日限额</p>}</div><div><b>共享额度池</b>{shared.map((bucket) => <span key={bucket.bucket_key}>{bucket.used_value} / {bucket.limit_value}<small>{bucket.bucket_key.includes("aviation") ? "航班 / 月" : "轻量 AI / 月"}</small></span>)}</div>{quota.cooldownUntil && <p className="quota-cooldown">查询暂停至 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(quota.cooldownUntil))}</p>}</div>;
 }
 
 function UsageGuide({ onClose }: { onClose: () => void }) {
@@ -75,8 +128,8 @@ function UsageGuide({ onClose }: { onClose: () => void }) {
         <header><div><p className="eyebrow">使用说明</p><h2 id="usage-guide-title">记录与规划指南</h2><p>从快速记录到交通安排，都可以在这里随时回看。</p></div><button type="button" className="icon-button" aria-label="关闭使用说明" onClick={onClose}><X /></button></header>
         <div className="usage-guide-list">
           <article><span className="settings-icon blue"><BookOpen /></span><div><h3>日常记录</h3><p>从首页顶部或底部加号添加消费、行程和随记。日常内容建议优先使用文字，必要时再补充图片，让长期记录保持轻巧、清晰，也更方便检索和回顾。</p></div></article>
-          <article><span className="settings-icon green"><Smartphone /></span><div><h3>交通计划</h3><p>进入行程规划并选择飞机、铁路或市内交通模板。飞机模板可输入航班号后主动查询并确认填入；起飞和降落分别使用当地时区。时间线会自动提炼航班号、车次、站点与时间，登机口和实际乘车路线也可以稍后补记。</p></div></article>
-          <article><span className="settings-icon violet"><Bot /></span><div><h3>AI 路线查询</h3><p>配置 DeepSeek 后，在市内交通模板填写起点、终点和预计时间，点击“AI 查询路线”。先检查并编辑返回内容，再点击“填入路线”，最后保存计划；AI 结果不会自动写入记录。</p></div></article>
+          <article><span className="settings-icon green"><Smartphone /></span><div><h3>交通计划与实际航班</h3><p>未来航班先手动填写计划信息，机场支持中文、英文、城市、拼音和 IATA 离线补全。计划到达约一小时后，卡片会出现“匹配实际飞行信息”；核对计划与实际差异并确认后才会保存，打开页面不会自动查询。</p></div></article>
+          <article><span className="settings-icon violet"><Bot /></span><div><h3>AI 助手</h3><p>路线查询、记账识别和随记润色共用轻量额度；旅行回顾与今日摘要独立计数。AI 结果始终先预览、后确认，不会直接替你保存。旅行回顾只使用服务端聚合统计和少量抽样随记。</p></div></article>
         </div>
         <footer><button type="button" className="primary-button" onClick={onClose}>完成</button></footer>
       </section>
@@ -120,7 +173,7 @@ function formatReleaseDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value));
 }
 
-function ProfileEditor({ profile, onClose, onSave }: { profile: UserProfile; onClose: () => void; onSave: Props["onUpdateProfile"] }) {
+function ProfileEditor({ profile, isDemo, onClose, onSave }: { profile: UserProfile; isDemo: boolean; onClose: () => void; onSave: Props["onUpdateProfile"] }) {
   const [displayName, setDisplayName] = useState(profile.display_name);
   const [avatarColor, setAvatarColor] = useState(profile.avatar_color);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatar_url);
@@ -176,10 +229,10 @@ function ProfileEditor({ profile, onClose, onSave }: { profile: UserProfile; onC
     <div className="modal-backdrop">
       <form className="modal-card profile-editor glass-card" onSubmit={submit}>
         <header><div><p className="eyebrow">个人资料</p><h2>你希望怎样出现？</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X /></button></header>
-        <div className="profile-preview"><ProfileAvatar profile={{ display_name: displayName, avatar_color: avatarColor, avatar_url: avatarUrl }} imageUrl={previewUrl ?? avatarUrl} className="avatar profile-preview-avatar" /><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><ImagePlus size={16} />上传图片</button><input ref={fileInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /></div>
+        <div className="profile-preview"><ProfileAvatar profile={{ display_name: displayName, avatar_color: avatarColor, avatar_url: avatarUrl }} imageUrl={previewUrl ?? avatarUrl} className="avatar profile-preview-avatar" />{!isDemo && <><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><ImagePlus size={16} />上传图片</button><input ref={fileInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /></>}</div>
         <label>显示昵称<input value={displayName} maxLength={40} onChange={(event) => setDisplayName(event.target.value)} placeholder="输入你的昵称" required /></label>
         <fieldset className="avatar-color-field"><legend>首字母头像颜色</legend><div>{AVATAR_COLORS.map((color) => <button type="button" key={color} className={!avatarUrl && !previewUrl && avatarColor === color ? "active" : ""} style={{ backgroundColor: color }} aria-label={`选择头像颜色 ${color}`} onClick={() => chooseColor(color)}>{!avatarUrl && !previewUrl && avatarColor === color && <Check size={15} />}</button>)}</div></fieldset>
-        <p className="profile-hint">图片会自动居中裁剪为正方形，最大 2MB。</p>
+        <p className="profile-hint">{isDemo ? "演示模式不支持图片上传，资料只保存在当前设备。" : "图片会自动居中裁剪为正方形，最大 2MB。"}</p>
         {error && <p className="field-error">{error}</p>}
         <footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving || !displayName.trim()}>{saving ? "保存中…" : "保存资料"}</button></footer>
       </form>
