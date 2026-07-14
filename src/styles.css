@@ -805,6 +805,16 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .release-entry li svg { flex: none; margin-top: 2px; color: var(--accent); }
 .release-history-empty { margin: 12px 0; color: var(--muted); text-align: center; font-size: 13px; }
 .release-history-modal > footer { flex: none; }
+.usage-guide-modal { width: min(620px, 100%); max-height: min(820px, 90vh); display: flex; flex-direction: column; overflow: hidden; }
+.usage-guide-modal > header { flex: none; }
+.usage-guide-modal > header h2 { margin-bottom: 6px; }
+.usage-guide-modal > header p:last-child { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.usage-guide-list { display: grid; gap: 12px; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
+.usage-guide-list article { display: grid; grid-template-columns: 40px 1fr; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft); }
+.usage-guide-list h3 { margin: 1px 0 6px; font-size: 14px; }
+.usage-guide-list p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.usage-guide-list .settings-icon { width: 36px; height: 36px; }
+.usage-guide-modal > footer { flex: none; }
 
 @media (max-width: 620px) {
   .login-shell { padding-bottom: 76px; }
@@ -824,6 +834,7 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
   .settings-footer { flex-direction: column; gap: 6px; }
   .settings-footer span + span::before { display: none; }
   .release-history-modal { max-height: calc(100vh - 20px); padding: 20px; }
+  .usage-guide-modal { max-height: calc(100vh - 20px); padding: 20px; }
   .release-entry { padding: 16px; }
 }
 

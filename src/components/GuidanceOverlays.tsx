@@ -3,7 +3,7 @@ import { ArrowRight, Check, ListFilter, MapPinned, Plus, Settings, SlidersHorizo
 import type { Changelog } from "../types";
 
 const ONBOARDING_STEPS = [
-  { title: "随时快速记录", description: "从页面顶部或底部加号开始，几秒内记下消费、行程或突然闪过的念头。", icon: Plus },
+  { title: "随时快速记录", description: "从页面顶部或底部加号开始，几秒内记下消费、行程或突然闪过的念头。日常内容建议优先使用文字，必要时再补充图片。", icon: Plus },
   { title: "所有片段汇成时间线", description: "保存后的内容会按时间倒序排列，最近发生的事情永远在最前面。", icon: ListFilter },
   { title: "按类型快速筛选", description: "使用顶部标签，只查看消费、行程或随记，让回顾更聚焦。", icon: SlidersHorizontal },
   { title: "提前安排下一次出发", description: "进入行程规划，按天添加计划；出发后还能打卡并关联实际消费和随记。", icon: MapPinned },

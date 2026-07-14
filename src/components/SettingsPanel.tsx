@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
+import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, LogOut, Mail, Moon, Palette, Pencil, ShieldCheck, Smartphone, Sun, WalletCards, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import type { Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
 import { CURRENCIES } from "../types";
@@ -22,6 +22,7 @@ const AVATAR_COLORS = ["#0A84FF", "#1C1C1E", "#3A3A3C", "#636366", "#8E8E93", "#
 export function SettingsPanel({ user, settings, profile, changelogs, online, onUpdate, onUpdateProfile, onSignOut }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [showingReleaseHistory, setShowingReleaseHistory] = useState(false);
+  const [showingUsageGuide, setShowingUsageGuide] = useState(false);
   const update = (patch: Partial<UserSettings>) => onUpdate({ ...settings, ...patch, updated_at: new Date().toISOString() });
 
   return (
@@ -39,6 +40,7 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
           </section>
           <section className="settings-card glass-card">
             <button className="settings-row"><span className="settings-icon coral"><Bell /></span><div><b>行程提醒</b><small>即将到来的计划与每日摘要</small></div><em>稍后开放</em><ChevronRight /></button>
+            <button className="settings-row" onClick={() => setShowingUsageGuide(true)}><span className="settings-icon violet"><BookOpen /></span><div><b>使用说明</b><small>快速记录、交通模板与 AI 路线查询</small></div><ChevronRight /></button>
             <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
             <button className="settings-row"><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
           </section>
@@ -60,8 +62,25 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
       </div>
       <footer className="app-footer settings-footer"><span>版本 {APP_VERSION}</span><span>© 2026 Sherlock Zang. 联系邮箱：sherlockzang8818@gmail.com</span></footer>
       {editingProfile && <ProfileEditor profile={profile} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
+      {showingUsageGuide && <UsageGuide onClose={() => setShowingUsageGuide(false)} />}
       {showingReleaseHistory && <ReleaseHistory changelogs={changelogs} onClose={() => setShowingReleaseHistory(false)} />}
     </section>
+  );
+}
+
+function UsageGuide({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="modal-backdrop">
+      <section className="modal-card usage-guide-modal glass-card" role="dialog" aria-modal="true" aria-labelledby="usage-guide-title">
+        <header><div><p className="eyebrow">使用说明</p><h2 id="usage-guide-title">记录与规划指南</h2><p>从快速记录到交通安排，都可以在这里随时回看。</p></div><button type="button" className="icon-button" aria-label="关闭使用说明" onClick={onClose}><X /></button></header>
+        <div className="usage-guide-list">
+          <article><span className="settings-icon blue"><BookOpen /></span><div><h3>日常记录</h3><p>从首页顶部或底部加号添加消费、行程和随记。日常内容建议优先使用文字，必要时再补充图片，让长期记录保持轻巧、清晰，也更方便检索和回顾。</p></div></article>
+          <article><span className="settings-icon green"><Smartphone /></span><div><h3>交通计划</h3><p>进入行程规划并选择飞机、铁路或市内交通模板，填写对应信息后保存。时间线会自动提炼航班号、车次、站点与时间，登机口和实际乘车路线也可以稍后补记。</p></div></article>
+          <article><span className="settings-icon violet"><Bot /></span><div><h3>AI 路线查询</h3><p>配置 DeepSeek 后，在市内交通模板填写起点、终点和预计时间，点击“AI 查询路线”。先检查并编辑返回内容，再点击“填入路线”，最后保存计划；AI 结果不会自动写入记录。</p></div></article>
+        </div>
+        <footer><button type="button" className="primary-button" onClick={onClose}>完成</button></footer>
+      </section>
+    </div>
   );
 }
 

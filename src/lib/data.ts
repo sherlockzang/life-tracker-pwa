@@ -4,6 +4,7 @@ import { listMutations, loadSnapshot, queueMutation, removeMutation, saveSnapsho
 import type { Changelog, Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, TripDraft, UserProfile, UserSettings } from "../types";
 import { APP_VERSION } from "../version";
 import { normalizeTransport } from "./transport";
+import { mergeBundledReleaseNotes } from "./releaseNotes";
 
 export interface AppData {
   records: LifeRecord[];
@@ -81,7 +82,7 @@ export async function fetchAppData(user: User): Promise<AppData> {
     settings,
     rates: (ratesResult.data || []).map((row) => normalizeRate(row)),
     profile,
-    changelogs: (changelogsResult.data || []) as Changelog[]
+    changelogs: mergeBundledReleaseNotes((changelogsResult.data || []) as Changelog[])
   };
   await saveSnapshot({ userId: user.id, ...data, savedAt: now() });
   return data;
@@ -96,7 +97,7 @@ export async function cachedAppData(user: User): Promise<AppData | null> {
     rates: cached.rates,
     settings: cached.settings,
     profile: cached.profile || defaultProfile(user),
-    changelogs: cached.changelogs || []
+    changelogs: mergeBundledReleaseNotes(cached.changelogs || [])
   };
 }
 
