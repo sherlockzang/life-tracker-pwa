@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { zonedDateTimeToIso } from "./tripDates";
 import type { ActualFlightInfo, FlightDetails, LifeRecord } from "../types";
 import { edgeFunctionMessage } from "./functionError";
+import { normalizeAircraftType } from "./aircraftTypes";
 
 export interface FlightMatchPreview {
   preview: ActualFlightInfo;
@@ -10,6 +11,10 @@ export interface FlightMatchPreview {
 }
 
 export const FLIGHT_LOOKUP_ERROR = "暂时无法获取航班信息，原计划不会被修改。";
+
+function normalizeActualInfo(info: ActualFlightInfo): ActualFlightInfo {
+  return { ...info, aircraft_type: normalizeAircraftType(info.aircraft_type) };
+}
 
 export function flightMatchEligibility(record: LifeRecord, now = Date.now()) {
   if (record.transport_type !== "flight" || !record.transport_details) return { eligible: false, reason: "这不是航班计划。" };
@@ -32,16 +37,17 @@ export async function matchFlightActual(record: LifeRecord, rematch = false) {
   const { data, error } = await supabase.functions.invoke("lookup-flight", { body: { action: "match", recordId: record.id, requestId, rematch } });
   if (error) throw new Error(await edgeFunctionMessage(error, FLIGHT_LOOKUP_ERROR));
   if (data?.error) throw new Error(data.error.message || FLIGHT_LOOKUP_ERROR);
-  if (data?.data?.cached) return { preview: data.data.actualInfo as ActualFlightInfo, requestId: data.data.requestId || requestId, cached: true };
+  if (data?.data?.cached) return { preview: normalizeActualInfo(data.data.actualInfo as ActualFlightInfo), requestId: data.data.requestId || requestId, cached: true };
   if (!data?.data?.preview || !data?.data?.requestId) throw new Error(FLIGHT_LOOKUP_ERROR);
-  return { preview: data.data.preview as ActualFlightInfo, requestId: data.data.requestId as string, cached: false };
+  return { preview: normalizeActualInfo(data.data.preview as ActualFlightInfo), requestId: data.data.requestId as string, cached: false };
 }
 
 export async function confirmFlightActual(recordId: string, requestId: string) {
   const { data, error } = await supabase.functions.invoke("lookup-flight", { body: { action: "confirm", recordId, requestId } });
   if (error) throw new Error(await edgeFunctionMessage(error, "实际飞行信息保存失败，请重试。"));
   if (data?.error) throw new Error(data.error.message || "实际飞行信息保存失败，请重试。");
-  return data.data.record as LifeRecord;
+  const record = data.data.record as LifeRecord;
+  return record.actual_info ? { ...record, actual_info: normalizeActualInfo(record.actual_info) } : record;
 }
 
 export function demoFlightPreview(record: LifeRecord): FlightMatchPreview {
@@ -64,7 +70,7 @@ export function demoFlightPreview(record: LifeRecord): FlightMatchPreview {
       estimated: { iso: arrivalScheduled, date: flight.arrival.date, time: addMinutes(flight.arrival.time, 4) },
       actual: { iso: arrivalScheduled, date: flight.arrival.date, time: addMinutes(flight.arrival.time, 4) }, delay_minutes: 4, terminal: flight.arrival.terminal || "3", gate: "108"
     },
-    aircraft_type: flight.aircraft_type || "B789",
+    aircraft_type: normalizeAircraftType(flight.aircraft_type || "B789"),
     registration: flight.registration || "JA-demo",
     source: "aviationstack",
     matched_at: new Date().toISOString()

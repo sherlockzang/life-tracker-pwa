@@ -113,6 +113,12 @@ a { color: inherit; }
 .sent-state h3 { margin: 0 0 10px; }
 .sent-state p { color: var(--muted); font-size: 13px; line-height: 1.65; }
 .text-button { background: transparent; border: 0; color: var(--accent); font-weight: 700; }
+.otp-form { display: grid; gap: 10px; margin-top: 18px; text-align: left; }
+.otp-form > label { margin: 0; color: var(--text-soft); font-size: 12px; font-weight: 650; }
+.otp-code-input { width: 100%; height: 58px; border: 1px solid var(--border-strong); border-radius: 14px; outline: 0; background: var(--surface-hover); color: var(--text); font-size: 25px; font-weight: 800; letter-spacing: .42em; text-align: center; }
+.otp-code-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
+.otp-secondary-actions { display: flex; justify-content: center; gap: 16px; margin-top: 14px; }
+.otp-secondary-actions .text-button:disabled { color: var(--muted); }
 
 /* App shell */
 .app-shell { min-height: 100vh; background: radial-gradient(circle at 50% -20%, rgba(76, 146, 184, .1), transparent 36%), var(--bg); }
@@ -143,6 +149,16 @@ a { color: inherit; }
 .current-trip > svg { color: var(--muted); }
 
 /* Composer */
+.home-quick-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .42fr); gap: 12px; align-items: stretch; }
+.home-quick-grid > .quick-collapsed, .home-quick-grid > .quick-expanded { height: 100%; }
+.home-route-entry { width: 100%; min-height: 94px; display: flex; align-items: center; gap: 12px; padding: 17px; border-radius: 23px; color: var(--text); text-align: left; transition: .22s; }
+.home-route-entry:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--violet) 35%, var(--border)); }
+.home-route-entry > span { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 15px; color: var(--violet); background: color-mix(in srgb, var(--violet) 13%, transparent); }
+.home-route-entry > div { min-width: 0; flex: 1; }
+.home-route-entry b, .home-route-entry small { display: block; }
+.home-route-entry b { font-size: 14px; }
+.home-route-entry small { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.home-route-entry > svg { flex: none; color: var(--muted); }
 .quick-collapsed { width: 100%; min-height: 94px; border-radius: 23px; display: flex; align-items: center; gap: 16px; padding: 18px 22px; color: var(--text); text-align: left; transition: .22s; }
 .quick-collapsed:hover { border-color: rgba(109, 201, 255, .22); transform: translateY(-1px); }
 .quick-plus { width: 48px; height: 48px; display: grid; place-items: center; flex: none; border-radius: 16px; color: #0c1317; background: linear-gradient(135deg, #aee7ff, #65c8f8); }
@@ -937,6 +953,12 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .airport-options button > b { color: var(--accent); font-size: 11px; }
 .airport-options button > span { min-width: 0; font-size: 10px; font-weight: 650; }
 .airport-options small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 8px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.aircraft-autocomplete { position: relative; z-index: 3; }
+.aircraft-options { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; right: 0; max-height: 230px; overflow-y: auto; padding: 5px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-solid); box-shadow: 0 12px 30px rgba(0,0,0,.18); }
+.aircraft-options button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; }
+.aircraft-options button:hover { background: var(--surface-hover); }
+.aircraft-options b { color: var(--accent); font-size: 10px; }
+.aircraft-options small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .flight-match-card { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); }
 .flight-match-card > div > b { font-size: 11px; }
 .flight-match-card p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
@@ -1002,6 +1024,24 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .invite-form input { min-width: 0; flex: 1; border: 0; background: transparent; color: var(--text); outline: 0; }
 .invite-message { margin: 8px 0 0; color: var(--accent); font-size: 9px; }
 .reset-demo-button { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; }
+.home-route-modal { width: min(620px, 100%); max-height: min(820px, calc(100dvh - 32px)); overflow-y: auto; }
+.home-route-query { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.home-route-query label, .home-route-save label { display: grid; gap: 7px; color: var(--text-soft); font-size: 10px; font-weight: 700; }
+.home-route-query label > span, .home-route-save label > span { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.home-route-query input, .home-route-save input, .home-route-save select { width: 100%; min-width: 0; height: 43px; padding: 0 11px; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--surface-soft); color: var(--text); }
+.home-route-query input:focus, .home-route-save input:focus, .home-route-save select:focus { border-color: var(--accent); }
+.home-route-query > button { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 6px; }
+.home-route-result { display: grid; gap: 9px; margin-top: 15px; padding: 14px; border: 1px solid color-mix(in srgb, var(--violet) 28%, var(--border)); border-radius: 13px; background: color-mix(in srgb, var(--violet) 6%, var(--surface-soft)); }
+.home-route-result > div { display: flex; align-items: center; gap: 7px; color: var(--violet); }
+.home-route-result b { color: var(--text); font-size: 11px; }
+.home-route-result p { margin: 0; color: var(--text-soft); font-size: 11px; line-height: 1.75; white-space: pre-wrap; }
+.home-route-result small { color: var(--muted); font-size: 8px; }
+.home-route-save { display: grid; gap: 10px; margin-top: 12px; padding: 13px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); }
+.home-route-save > div { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.home-route-save > button { display: inline-flex; align-items: center; gap: 6px; }
+.home-route-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 14px; }
+.home-route-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.home-route-actions small { max-width: 270px; color: var(--muted); font-size: 9px; line-height: 1.5; text-align: right; }
 
 /* Dynamic Island and standalone PWA safe areas. */
 .app-shell, .login-shell, .loading-screen { min-height: 100vh; min-height: 100dvh; }
@@ -1028,6 +1068,11 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
   .flight-lookup-action { grid-template-columns: 1fr; }
   .flight-lookup-modal { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); }
   .flight-compare-grid, .note-compare, .quota-overview { grid-template-columns: 1fr; }
+  .home-quick-grid, .home-route-query, .home-route-save > div { grid-template-columns: 1fr; }
+  .home-route-query > button { grid-column: 1; }
+  .home-route-actions { align-items: stretch; flex-direction: column-reverse; }
+  .home-route-actions button { width: 100%; }
+  .home-route-actions small { max-width: none; text-align: left; }
   .composer-ai-input { align-items: stretch; flex-direction: column; }
   .ai-inline-button { align-self: flex-start; }
   .actual-flight-summary { grid-template-columns: 1fr; }

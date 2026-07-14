@@ -7,6 +7,7 @@ import { zonedDateTimeToIso } from "../lib/tripDates";
 import { confirmFlightActual, demoFlightPreview, flightMatchEligibility, matchFlightActual, type FlightMatchPreview } from "../lib/flightLookup";
 import { airportLabel, searchAirports, type AirportOption } from "../lib/airports";
 import { TIMEZONE_OPTIONS, timeZoneLabel } from "../lib/timezones";
+import { normalizeAircraftType, searchAircraftTypes } from "../lib/aircraftTypes";
 
 type PlanKind = "general" | TransportType;
 
@@ -107,7 +108,7 @@ export function TransportPlanEditor({ day, trip, count, record, modal, isDemo = 
       <label>登机口 <span className="optional-tag">选填</span><input value={flight.gate || ""} onChange={(event) => setFlight({ ...flight, gate: event.target.value })} /></label>
       <label>座位号 <span className="optional-tag">选填</span><input value={flight.seat || ""} onChange={(event) => setFlight({ ...flight, seat: event.target.value })} /></label>
       <label>注册号 <span className="optional-tag">选填</span><input value={flight.registration || ""} onChange={(event) => setFlight({ ...flight, registration: event.target.value.toUpperCase() })} /></label>
-      <label>机型 <span className="optional-tag">选填</span><input value={flight.aircraft_type || ""} onChange={(event) => setFlight({ ...flight, aircraft_type: event.target.value })} /></label>
+      <AircraftTypeField value={flight.aircraft_type || ""} onChange={(aircraftType) => setFlight({ ...flight, aircraft_type: aircraftType })} />
       <label className="field-span-2">备注 <span className="optional-tag">选填</span><textarea rows={3} value={flight.notes || ""} onChange={(event) => setFlight({ ...flight, notes: event.target.value })} /></label>
     </div>}
 
@@ -119,6 +120,12 @@ export function TransportPlanEditor({ day, trip, count, record, modal, isDemo = 
     {showAi && <TransitAiDialog metro={metro} isDemo={isDemo} onClose={() => setShowAi(false)} onFill={(route) => { setMetro({ ...metro, route_description: route }); setShowAi(false); }} />}
   </form>;
   return modal ? <div className="modal-backdrop">{form}</div> : form;
+}
+
+function AircraftTypeField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [focused, setFocused] = useState(false);
+  const options = focused ? searchAircraftTypes(value) : [];
+  return <label className="aircraft-autocomplete">机型 <span className="optional-tag">选填</span><input value={value} onChange={(event) => onChange(event.target.value)} onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); onChange(normalizeAircraftType(value)); }} placeholder="例如 78X、787-10" autoComplete="off" />{options.length > 0 && <div className="aircraft-options">{options.map((option) => <button type="button" key={option.canonical} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option.canonical); setFocused(false); }}><b>{option.canonical}</b><small>{option.aliases.slice(0, 4).join(" · ")}</small></button>)}</div>}</label>;
 }
 
 function FlightStopEditor({ legend, stop, onChange }: { legend: string; stop: FlightStop; onChange: (stop: FlightStop) => void }) {
