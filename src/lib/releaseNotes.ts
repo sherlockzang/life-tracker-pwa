@@ -34,7 +34,16 @@ const RELEASE_1_4_0_SUMMARY = [
   "优化首页快捷操作布局、验证码输入体验、移动端弹窗与机型候选交互；本次更新没有修改数据库表结构，已有记录、行程、权限与额度数据无需迁移。"
 ];
 
+const RELEASE_1_4_1_SUMMARY = [
+  "新增仅 Owner 可见的账号管理后台。可以按邮箱查找用户、查看注册与最近登录时间、本月航班及 AI 使用概况，并在 Standard 与 Friend 权限之间调整；Owner 身份不可修改，所有权限变更都会记录操作者、目标账号、修改前后等级和时间。后台不会读取用户的消费、行程、随记或图片内容。",
+  "重构航班月度额度：服务商 100 次额度现在是所有账号的总池，非 Owner 账号仍共同使用最多 80 次。Owner 不再固定为 20 次，而是可以使用总池中尚未消耗的全部额度；其他用户没有使用的部分不会闲置，同时仍为 Owner 保留至少 20 次可用空间。",
+  "修正 Owner 智能服务权限。轻量 AI 的 200 次参考值和旅行回顾的 50 次参考值不再被误当作硬限制，设置页改为直接显示 AI 不设账号额度，并展示航班总池剩余量、Owner 已用量与其他用户共享池用量。",
+  "“隐私与数据”现可点击查看，说明账号级行级安全隔离、外部 API 密钥仅保存在服务端、Owner 后台的可见范围，以及邮箱验证码与登录会话由 Supabase Auth 管理。",
+  "修复更换头像时可能出现的 row-level security policy 错误，并优化 Owner 后台、移动端弹窗与额度信息的展示。"
+];
+
 const BUNDLED_RELEASES: Changelog[] = [
+  { id: "bundled-1.4.1", version: "1.4.1", summary: RELEASE_1_4_1_SUMMARY, created_at: "2026-07-15T04:00:00.000Z" },
   { id: "bundled-1.4.0", version: "1.4.0", summary: RELEASE_1_4_0_SUMMARY, created_at: "2026-07-14T12:00:00.000Z" },
   { id: "bundled-1.3.0", version: "1.3.0", summary: RELEASE_1_3_0_SUMMARY, created_at: "2026-07-14T11:00:00.000Z" },
   { id: "bundled-1.2.1", version: "1.2.1", summary: RELEASE_1_2_1_SUMMARY, created_at: "2026-07-14T09:30:00.000Z" },

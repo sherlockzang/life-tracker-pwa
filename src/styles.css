@@ -1019,6 +1019,39 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
 .quota-overview span small { color: var(--muted); font-size: 8px; font-weight: 500; }
 .quota-overview p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
 .quota-cooldown { grid-column: 1 / -1; color: var(--warning) !important; }
+.owner-quota-overview > div { align-content: start; }
+.owner-quota-overview > div > p { padding-top: 2px; }
+.owner-admin-card { padding-top: 6px; padding-bottom: 6px; }
+.owner-admin-card .settings-row { border-bottom: 0; }
+.privacy-modal { width: min(540px, 100%); }
+.privacy-copy { display: grid; gap: 12px; }
+.privacy-copy p { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-hover); color: var(--text-soft); font-size: 11px; line-height: 1.75; }
+.owner-admin-modal { width: min(760px, 100%); max-height: min(860px, calc(100dvh - 32px)); display: flex; flex-direction: column; overflow: hidden; }
+.owner-admin-modal > header { flex: none; }
+.owner-admin-modal > header p:last-child { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.owner-user-search { flex: none; display: grid; grid-template-columns: 1fr auto; gap: 9px; }
+.owner-user-search label { min-width: 0; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; color: var(--muted); background: var(--surface-soft); }
+.owner-user-search input { min-width: 0; width: 100%; height: auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text); }
+.owner-user-list { min-height: 120px; display: grid; gap: 10px; margin-top: 14px; padding-right: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.owner-admin-state { min-height: 110px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.owner-user-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft); }
+.owner-user-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.owner-user-heading strong { display: block; overflow-wrap: anywhere; color: var(--text); font-size: 12px; }
+.owner-user-heading span { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.owner-tier-badge { flex: none; padding: 5px 8px; border-radius: 999px; background: var(--surface-hover); color: var(--text-soft); font-size: 8px; font-style: normal; font-weight: 800; }
+.owner-tier-badge.tier-owner { background: var(--accent); color: white; }
+.owner-tier-badge.tier-friend { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.owner-user-usage { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.owner-user-usage span { display: grid; gap: 3px; padding: 9px; border-radius: 9px; background: var(--surface-hover); color: var(--muted); font-size: 8px; }
+.owner-user-usage b { color: var(--text); font-size: 11px; }
+.owner-tier-actions { display: flex; align-items: center; gap: 7px; }
+.owner-tier-actions button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: var(--text-soft); font-size: 9px; font-weight: 700; }
+.owner-tier-actions button.active { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
+.owner-tier-actions button:disabled { cursor: default; opacity: .55; }
+.owner-tier-actions small { color: var(--muted); font-size: 8px; }
+.owner-audit-note { flex: none; display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.owner-audit-note svg { flex: none; color: var(--green); }
+.owner-admin-modal > footer { flex: none; }
 .invite-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; }
 .invite-form label { min-width: 0; display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); }
 .invite-form input { min-width: 0; flex: 1; border: 0; background: transparent; color: var(--text); outline: 0; }
@@ -1076,6 +1109,12 @@ select { font-family: -apple-system, "PingFang SC", sans-serif; }
   .composer-ai-input { align-items: stretch; flex-direction: column; }
   .ai-inline-button { align-self: flex-start; }
   .actual-flight-summary { grid-template-columns: 1fr; }
+  .owner-admin-modal { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); }
+  .owner-user-search { grid-template-columns: 1fr; }
+  .owner-user-search .secondary-button { width: 100%; }
+  .owner-user-heading { align-items: flex-start; }
+  .owner-user-usage { grid-template-columns: 1fr 1fr; }
+  .owner-user-usage span:last-child { grid-column: 1 / -1; }
   .airport-options { position: fixed; left: 20px; right: 20px; top: 22%; max-height: 50dvh; }
 }
 

@@ -13,13 +13,11 @@ function shanghaiPeriod() {
 }
 
 function expectedBuckets(userId: string, tier: string, periods: ReturnType<typeof shanghaiPeriod>) {
-  const values: Array<{ bucket_key: string; used_value: number; limit_value: number; period_end: string }> = [];
-  if (tier === "owner") {
-    values.push({ bucket_key: `aviation:owner:${periods.month}`, used_value: 0, limit_value: 20, period_end: periods.monthEnd });
-    values.push({ bucket_key: `deepseek:light:owner:${userId}:${periods.day}`, used_value: 0, limit_value: 200, period_end: periods.dayEnd });
-    values.push({ bucket_key: `deepseek:recap:owner:${userId}:${periods.month}`, used_value: 0, limit_value: 50, period_end: periods.monthEnd });
-  } else {
-    values.push({ bucket_key: `aviation:shared:${periods.month}`, used_value: 0, limit_value: 80, period_end: periods.monthEnd });
+  const values: Array<{ bucket_key: string; used_value: number; limit_value: number; period_end: string }> = [
+    { bucket_key: `aviation:global:${periods.month}`, used_value: 0, limit_value: 100, period_end: periods.monthEnd },
+    { bucket_key: `aviation:shared:${periods.month}`, used_value: 0, limit_value: 80, period_end: periods.monthEnd }
+  ];
+  if (tier !== "owner") {
     values.push({ bucket_key: `deepseek:light:shared:${periods.month}`, used_value: 0, limit_value: 10000, period_end: periods.monthEnd });
     values.push({ bucket_key: `deepseek:recap:${tier}:${userId}:${periods.month}`, used_value: 0, limit_value: tier === "friend" ? 10 : 3, period_end: periods.monthEnd });
     if (tier === "standard") {
@@ -50,12 +48,24 @@ export default {
       ]);
       const usedByKey = new Map((buckets || []).map((bucket) => [bucket.bucket_key, bucket]));
       const quotaBuckets = expected.map((bucket) => usedByKey.get(bucket.bucket_key) || bucket);
+      const globalAviation = quotaBuckets.find((bucket) => bucket.bucket_key.startsWith("aviation:global:"));
+      const sharedAviation = quotaBuckets.find((bucket) => bucket.bucket_key.startsWith("aviation:shared:"));
+      const globalUsed = globalAviation?.used_value || 0;
+      const nonOwnerUsed = sharedAviation?.used_value || 0;
       return json(origin, requestId, {
         data: {
           tier,
           timezone: "Asia/Shanghai",
           cooldownUntil: cooldown?.until_at || null,
           deepseekMonthTotal: deepseekMonth || 0,
+          aviation: {
+            globalUsed,
+            globalLimit: 100,
+            globalRemaining: Math.max(0, 100 - globalUsed),
+            nonOwnerUsed,
+            nonOwnerLimit: 80,
+            ownerUsed: Math.max(0, globalUsed - nonOwnerUsed)
+          },
           buckets: quotaBuckets
         }
       });

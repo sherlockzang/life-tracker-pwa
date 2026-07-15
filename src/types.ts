@@ -153,7 +153,29 @@ export interface ApiQuotaSnapshot {
   timezone: "Asia/Shanghai";
   cooldownUntil: string | null;
   deepseekMonthTotal: number;
+  aviation: {
+    globalUsed: number;
+    globalLimit: 100;
+    globalRemaining: number;
+    nonOwnerUsed: number;
+    nonOwnerLimit: 80;
+    ownerUsed: number;
+  };
   buckets: ApiQuotaBucket[];
+}
+
+export interface OwnerManagedUser {
+  id: string;
+  email: string;
+  createdAt: string;
+  lastSignInAt: string | null;
+  tier: Exclude<AccountTier, "demo">;
+  source: string;
+  grantedAt: string | null;
+  monthUsage: {
+    aviation: number;
+    deepseek: number;
+  };
 }
 
 export interface ExchangeRate {

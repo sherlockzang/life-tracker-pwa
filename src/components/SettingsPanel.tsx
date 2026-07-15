@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, KeyRound, LoaderCircle, LogOut, Mail, Moon, Palette, Pencil, RefreshCcw, ShieldCheck, Smartphone, Sparkles, Sun, WalletCards, X } from "lucide-react";
+import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, KeyRound, LoaderCircle, LogOut, Mail, Moon, Palette, Pencil, RefreshCcw, Search, ShieldCheck, Smartphone, Sparkles, Sun, Users, WalletCards, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
-import type { ApiQuotaSnapshot, Changelog, Currency, ThemeMode, UserProfile, UserSettings } from "../types";
+import type { ApiQuotaSnapshot, Changelog, Currency, OwnerManagedUser, ThemeMode, UserProfile, UserSettings } from "../types";
 import { CURRENCIES } from "../types";
 import { APP_VERSION } from "../version";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { generateDailySummary } from "../lib/ai";
-import { getApiQuota, redeemInvite } from "../lib/account";
+import { getApiQuota, getOwnerManagedUsers, redeemInvite, setOwnerManagedUserTier } from "../lib/account";
 
 interface Props {
   user: User;
@@ -27,6 +27,8 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
   const [editingProfile, setEditingProfile] = useState(false);
   const [showingReleaseHistory, setShowingReleaseHistory] = useState(false);
   const [showingUsageGuide, setShowingUsageGuide] = useState(false);
+  const [showingPrivacy, setShowingPrivacy] = useState(false);
+  const [showingOwnerAdmin, setShowingOwnerAdmin] = useState(false);
   const [quota, setQuota] = useState<ApiQuotaSnapshot | null>(null);
   const [quotaError, setQuotaError] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -74,7 +76,7 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             {summary && <div className="daily-summary"><Sparkles size={16} /><p>{summary}</p></div>}
             <button className="settings-row" onClick={() => setShowingUsageGuide(true)}><span className="settings-icon violet"><BookOpen /></span><div><b>使用说明</b><small>快速记录、交通模板与 AI 路线查询</small></div><ChevronRight /></button>
             <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
-            <button className="settings-row"><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
+            <button className="settings-row" onClick={() => setShowingPrivacy(true)}><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
           </section>
           <section className="settings-card glass-card smart-service-card">
             <header><span className="settings-icon violet"><Bot /></span><div><h2>智能服务与权限</h2><p>额度按北京时间重置，记录与手动编辑始终不受影响</p></div></header>
@@ -85,6 +87,9 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             {inviteMessage && <p className="invite-message">{inviteMessage}</p>}
             {isDemo && <button className="secondary-button reset-demo-button" onClick={onResetDemo}><RefreshCcw size={15} />重置演示数据</button>}
           </section>
+          {!isDemo && quota?.tier === "owner" && <section className="settings-card glass-card owner-admin-card">
+            <button className="settings-row" onClick={() => setShowingOwnerAdmin(true)}><span className="settings-icon blue"><Users /></span><div><b>账号与权限后台</b><small>查找用户、调整 Friend 权限并查看本月智能服务用量</small></div><ChevronRight /></button>
+          </section>}
           <section className="settings-card glass-card credits-card" aria-labelledby="credits-title">
             <header><span className="settings-icon blue"><HeartHandshake /></span><div><h2 id="credits-title">致谢</h2><p>感谢参与这个长期个人记录工具的伙伴</p></div></header>
             <p lang="en">Built with the help of Codex, with special thanks to Claude for prompt design and development support.</p>
@@ -105,20 +110,101 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
       {editingProfile && <ProfileEditor profile={profile} isDemo={isDemo} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
       {showingUsageGuide && <UsageGuide onClose={() => setShowingUsageGuide(false)} />}
       {showingReleaseHistory && <ReleaseHistory changelogs={changelogs} onClose={() => setShowingReleaseHistory(false)} />}
+      {showingPrivacy && <PrivacyDialog onClose={() => setShowingPrivacy(false)} />}
+      {showingOwnerAdmin && <OwnerAdminDialog onClose={() => setShowingOwnerAdmin(false)} />}
     </section>
   );
 }
 
 function tierDescription(tier?: ApiQuotaSnapshot["tier"]) {
-  if (tier === "owner") return "独立航班额度；AI 不计入共享池，并保留防故障软上限";
+  if (tier === "owner") return "航班可使用本月总池的全部剩余额度；AI 不设账号额度";
   if (tier === "friend") return "无个人日限额，仍受共享池与频率保护";
   return "航班每天 2 次；轻量 AI 助手每天共用 15 次";
 }
 
 function QuotaOverview({ quota }: { quota: ApiQuotaSnapshot }) {
+  if (quota.tier === "owner") {
+    return <div className="quota-overview owner-quota-overview">
+      <div><b>航班总额度</b><span>{quota.aviation.globalUsed} / {quota.aviation.globalLimit}<small>全部账号 / 月</small></span><p>当前还可使用 {quota.aviation.globalRemaining} 次；Owner 本月已使用 {quota.aviation.ownerUsed} 次。</p></div>
+      <div><b>Owner 权限</b><span>不限额<small>AI 功能</small></span><p>其他用户航班共享池已使用 {quota.aviation.nonOwnerUsed} / {quota.aviation.nonOwnerLimit} 次；Owner 不受该 80 次上限影响。</p></div>
+      {quota.cooldownUntil && <p className="quota-cooldown">查询暂停至 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(quota.cooldownUntil))}</p>}
+    </div>;
+  }
   const own = quota.buckets.filter((bucket) => bucket.bucket_key.includes(":standard:") || bucket.bucket_key.includes(":owner:") || bucket.bucket_key.includes(":recap:"));
   const shared = quota.buckets.filter((bucket) => bucket.bucket_key.includes(":shared:"));
   return <div className="quota-overview"><div><b>个人额度</b>{own.length ? own.map((bucket) => <span key={bucket.bucket_key}>{bucket.used_value} / {bucket.limit_value}<small>{bucket.bucket_key.includes("aviation") ? "航班" : bucket.bucket_key.includes("recap") ? "旅行回顾" : "轻量 AI"}</small></span>) : <p>当前账号没有个人日限额</p>}</div><div><b>共享额度池</b>{shared.map((bucket) => <span key={bucket.bucket_key}>{bucket.used_value} / {bucket.limit_value}<small>{bucket.bucket_key.includes("aviation") ? "航班 / 月" : "轻量 AI / 月"}</small></span>)}</div>{quota.cooldownUntil && <p className="quota-cooldown">查询暂停至 {new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(quota.cooldownUntil))}</p>}</div>;
+}
+
+function PrivacyDialog({ onClose }: { onClose: () => void }) {
+  return <div className="modal-backdrop">
+    <section className="modal-card privacy-modal glass-card" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
+      <header><div><p className="eyebrow">隐私与数据</p><h2 id="privacy-title">你的记录只属于你。</h2></div><button type="button" className="icon-button" aria-label="关闭隐私说明" onClick={onClose}><X /></button></header>
+      <div className="privacy-copy">
+        <p>你的记录、行程和设置均通过 Supabase 行级安全策略按账号隔离，其他用户无法读取。外部 API 密钥只保存在服务端；Owner 后台仅用于管理账号权限和额度，不会展示用户的个人记录内容。</p>
+        <p>登录验证码和会话由 Supabase Auth 管理，Life Tracker 不保存你的邮箱密码。</p>
+      </div>
+      <footer><button type="button" className="primary-button" onClick={onClose}>知道了</button></footer>
+    </section>
+  </div>;
+}
+
+function OwnerAdminDialog({ onClose }: { onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [users, setUsers] = useState<OwnerManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState("");
+  const [error, setError] = useState("");
+
+  async function load(nextQuery = query) {
+    setLoading(true); setError("");
+    try { setUsers(await getOwnerManagedUsers(nextQuery)); }
+    catch (loadError) { setError(loadError instanceof Error ? loadError.message : "暂时无法读取账号列表"); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    let active = true;
+    void getOwnerManagedUsers("").then((result) => { if (active) setUsers(result); }).catch((loadError) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : "暂时无法读取账号列表");
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function changeTier(managedUser: OwnerManagedUser, tier: "standard" | "friend") {
+    if (managedUser.tier === "owner" || managedUser.tier === tier) return;
+    const nextLabel = tier === "friend" ? "Friend" : "Standard";
+    if (!window.confirm(`确认将 ${managedUser.email} 调整为 ${nextLabel}？`)) return;
+    setSavingId(managedUser.id); setError("");
+    try {
+      await setOwnerManagedUserTier(managedUser.id, tier);
+      setUsers((current) => current.map((item) => item.id === managedUser.id ? { ...item, tier, source: "admin" } : item));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "权限修改失败，请稍后重试");
+    } finally { setSavingId(""); }
+  }
+
+  return <div className="modal-backdrop">
+    <section className="modal-card owner-admin-modal glass-card" role="dialog" aria-modal="true" aria-labelledby="owner-admin-title">
+      <header><div><p className="eyebrow">Owner 后台</p><h2 id="owner-admin-title">账号与权限</h2><p>只管理账号等级与智能服务用量，不提供个人记录内容入口。</p></div><button type="button" className="icon-button" aria-label="关闭账号后台" onClick={onClose}><X /></button></header>
+      <form className="owner-user-search" onSubmit={(event) => { event.preventDefault(); void load(query); }}><label><Search size={16} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按邮箱查找用户" /></label><button className="secondary-button" disabled={loading}>{loading ? "查询中…" : "查找"}</button></form>
+      {error && <p className="field-error">{error}</p>}
+      <div className="owner-user-list">
+        {loading && <div className="owner-admin-state"><LoaderCircle className="spin" />正在读取账号…</div>}
+        {!loading && !users.length && <div className="owner-admin-state">没有找到符合条件的账号。</div>}
+        {!loading && users.map((managedUser) => <article className="owner-user-card" key={managedUser.id}>
+          <div className="owner-user-heading"><div><strong>{managedUser.email}</strong><span>注册 {formatAdminDate(managedUser.createdAt)} · 最近登录 {managedUser.lastSignInAt ? formatAdminDate(managedUser.lastSignInAt) : "暂无"}</span></div><em className={`owner-tier-badge tier-${managedUser.tier}`}>{({ standard: "Standard", friend: "Friend", owner: "Owner" } as const)[managedUser.tier]}</em></div>
+          <div className="owner-user-usage"><span><b>{managedUser.monthUsage.aviation}</b>本月航班</span><span><b>{managedUser.monthUsage.deepseek}</b>本月 AI</span><span><b>{managedUser.source === "invite" ? "邀请码" : managedUser.source === "admin" ? "后台" : "默认"}</b>权限来源</span></div>
+          <div className="owner-tier-actions"><button type="button" className={managedUser.tier === "standard" ? "active" : ""} disabled={managedUser.tier === "owner" || savingId === managedUser.id} onClick={() => void changeTier(managedUser, "standard")}>Standard</button><button type="button" className={managedUser.tier === "friend" ? "active" : ""} disabled={managedUser.tier === "owner" || savingId === managedUser.id} onClick={() => void changeTier(managedUser, "friend")}>Friend</button>{managedUser.tier === "owner" && <small>Owner 身份已锁定</small>}{savingId === managedUser.id && <LoaderCircle className="spin" size={16} />}</div>
+        </article>)}
+      </div>
+      <p className="owner-audit-note"><ShieldCheck size={15} />每次权限变更都会记录操作者、目标账号、修改前后等级和时间。</p>
+      <footer><button type="button" className="primary-button" onClick={onClose}>完成</button></footer>
+    </section>
+  </div>;
+}
+
+function formatAdminDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function UsageGuide({ onClose }: { onClose: () => void }) {

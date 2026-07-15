@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.get-api-quota]
 verify_jwt = true
+
+[functions.owner-admin]
+verify_jwt = true

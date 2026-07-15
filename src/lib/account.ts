@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { ApiQuotaSnapshot } from "../types";
+import type { ApiQuotaSnapshot, OwnerManagedUser } from "../types";
 import { edgeFunctionMessage } from "./functionError";
 
 export async function getApiQuota() {
@@ -13,6 +13,20 @@ export async function redeemInvite(code: string) {
   if (error) throw new Error(await edgeFunctionMessage(error, "邀请码暂时无法验证"));
   if (data?.error) throw new Error(data.error.message || "邀请码无效");
   return data.data as { tier: "friend" | "owner" };
+}
+
+export async function getOwnerManagedUsers(query = "") {
+  const { data, error } = await supabase.functions.invoke("owner-admin", { body: { action: "list", query } });
+  if (error) throw new Error(await edgeFunctionMessage(error, "暂时无法读取账号列表"));
+  if (data?.error) throw new Error(data.error.message || "暂时无法读取账号列表");
+  return (data?.data?.users || []) as OwnerManagedUser[];
+}
+
+export async function setOwnerManagedUserTier(targetUserId: string, tier: "standard" | "friend") {
+  const { data, error } = await supabase.functions.invoke("owner-admin", { body: { action: "set_tier", targetUserId, tier } });
+  if (error) throw new Error(await edgeFunctionMessage(error, "权限修改失败，请稍后重试"));
+  if (data?.error) throw new Error(data.error.message || "权限修改失败，请稍后重试");
+  return data.data as { ok: true; old_tier: string; new_tier: "standard" | "friend" };
 }
 
 async function digest(value: string) {
