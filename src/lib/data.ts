@@ -1,11 +1,15 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import { listMutations, loadSnapshot, queueMutation, removeMutation, saveSnapshot } from "./offline";
+import { claimMutation, failMutation, finishMutation, listMutations, loadSnapshot, queueMutation, reconcileMutations, saveSnapshot, type PendingMutation } from "./offline";
+import { replayMutation, type SaveResult } from "./syncEngine";
+import { invalidateChangedFlight } from "./flightMatchState";
 import type { Changelog, Currency, ExchangeRate, LifeRecord, RecordDraft, Trip, TripDraft, UserProfile, UserSettings } from "../types";
 import { APP_VERSION } from "../version";
 import { normalizeTransport } from "./transport";
 import { mergeBundledReleaseNotes } from "./releaseNotes";
 import { normalizeAircraftType } from "./aircraftTypes";
+import { normalizeScheduleDetails } from "./schedules";
+import { readAllPages } from "../../supabase/functions/_shared/pagination";
 
 export interface AppData {
   records: LifeRecord[];
@@ -44,13 +48,14 @@ export function defaultProfile(user: User): UserProfile {
   };
 }
 
-const normalizeRecord = (row: Record<string, unknown>): LifeRecord => {
+export const normalizeRecord = (row: Record<string, unknown>): LifeRecord => {
   const transport = normalizeTransport(row.transport_type, row.transport_details);
   const actualInfo = row.actual_info as NonNullable<LifeRecord["actual_info"]> | null;
   return {
     ...(row as unknown as LifeRecord),
     amount: row.amount == null ? null : Number(row.amount),
     sort_order: row.sort_order == null ? null : Number(row.sort_order),
+    ...(row.schedule_details !== undefined ? { schedule_details: normalizeScheduleDetails(row.schedule_details) } : {}),
     actual_match_status: (row.actual_match_status || "never") as LifeRecord["actual_match_status"],
     actual_info: actualInfo ? { ...actualInfo, aircraft_type: normalizeAircraftType(actualInfo.aircraft_type) } : null,
     actual_info_matched: Boolean(row.actual_info_matched),
@@ -67,31 +72,64 @@ const normalizeRate = (row: Record<string, unknown>): ExchangeRate => ({
 });
 
 export async function fetchAppData(user: User): Promise<AppData> {
-  const [recordsResult, tripsResult, settingsResult, ratesResult, profileResult, changelogsResult] = await Promise.all([
-    supabase.from("records").select("*").order("event_at", { ascending: false }),
-    supabase.from("trips").select("*").is("archived_at", null).order("start_date", { ascending: false }),
+  const authBefore = (await supabase.auth.getSession()).data.session;
+  if (authBefore?.user.id !== user.id) throw new Error("账号已切换，请在原账号中读取数据");
+  const collection = (table: "records" | "trips" | "exchange_rates" | "changelogs") => readAllPages((cursor) => {
+    let query = supabase.from(table).select("*").order("id", { ascending: true }).limit(500);
+    if (table !== "changelogs") query = query.eq("user_id", user.id);
+    if (table === "trips") query = query.is("archived_at", null);
+    if (cursor) query = query.gt("id", cursor);
+    return query;
+  });
+  const [recordRows, tripRows, settingsResult, rateRows, profileResult, changelogRows] = await Promise.all([
+    collection("records"),
+    collection("trips"),
     supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle(),
-    supabase.from("exchange_rates").select("*").order("rate_date", { ascending: false }),
+    collection("exchange_rates"),
     supabase.from("profiles").select("*").eq("user_id", user.id).maybeSingle(),
-    supabase.from("changelogs").select("*").order("created_at", { ascending: false })
+    collection("changelogs")
   ]);
 
-  const firstError = recordsResult.error || tripsResult.error || settingsResult.error || ratesResult.error || profileResult.error || changelogsResult.error;
+  const firstError = settingsResult.error || profileResult.error;
   if (firstError) throw firstError;
+  const authAfter = (await supabase.auth.getSession()).data.session;
+  if (authAfter?.user.id !== user.id || authAfter.access_token !== authBefore.access_token) throw new Error("登录会话已更新，请重新读取云端数据");
 
-  const settings = (settingsResult.data as UserSettings | null) || defaultSettings(user.id);
-  if (!settingsResult.data) await supabase.from("user_settings").upsert(settings);
+  let settings = (settingsResult.data as UserSettings | null) || defaultSettings(user.id);
+  if (!settingsResult.data) {
+    const inserted = await supabase.from("user_settings").upsert(settings, { onConflict: "user_id", ignoreDuplicates: true });
+    if (inserted.error) throw inserted.error;
+    const saved = await supabase.from("user_settings").select().eq("user_id", user.id).single();
+    if (saved.error) throw saved.error;
+    settings = saved.data as UserSettings;
+  }
   const profile = (profileResult.data as UserProfile | null) || defaultProfile(user);
-  if (!profileResult.data) await supabase.from("profiles").upsert(profile);
+  if (!profileResult.data) {
+    const inserted = await supabase.from("profiles").upsert(profile, { onConflict: "user_id", ignoreDuplicates: true });
+    if (inserted.error) throw inserted.error;
+    const saved = await supabase.from("profiles").select().eq("user_id", user.id).single();
+    if (saved.error) throw saved.error;
+    Object.assign(profile, saved.data);
+  }
 
   const data: AppData = {
-    records: (recordsResult.data || []).map((row) => normalizeRecord(row)),
-    trips: (tripsResult.data || []) as Trip[],
+    records: recordRows.map((row) => normalizeRecord(row)).sort((a, b) => b.event_at.localeCompare(a.event_at) || a.id.localeCompare(b.id)),
+    trips: (tripRows as Trip[]).sort((a, b) => b.start_date.localeCompare(a.start_date) || a.id.localeCompare(b.id)),
     settings,
-    rates: (ratesResult.data || []).map((row) => normalizeRate(row)),
+    rates: rateRows.map((row) => normalizeRate(row)).sort((a, b) => b.rate_date.localeCompare(a.rate_date) || a.id.localeCompare(b.id)),
     profile,
-    changelogs: mergeBundledReleaseNotes((changelogsResult.data || []) as Changelog[])
+    changelogs: mergeBundledReleaseNotes(changelogRows as Changelog[])
   };
+  for (const item of await listMutations(user.id)) {
+    // Rejected/conflicting drafts remain visible and exportable, never silently
+    // replaced by an older cloud row. Legacy unproven queue entries stay isolated.
+    if (item.legacy || item.supersededBy) continue;
+    if (item.table === "records") data.records = [normalizeRecord(item.payload), ...data.records.filter((row) => row.id !== item.entityId)];
+    if (item.table === "trips") data.trips = [item.payload as unknown as Trip, ...data.trips.filter((row) => row.id !== item.entityId)];
+    if (item.table === "user_settings") data.settings = item.payload as unknown as UserSettings;
+    if (item.table === "profiles") data.profile = item.payload as unknown as UserProfile;
+    if (item.table === "exchange_rates") data.rates = [normalizeRate(item.payload), ...data.rates.filter((row) => row.id !== item.entityId)];
+  }
   await saveSnapshot({ userId: user.id, ...data, savedAt: now() });
   return data;
 }
@@ -109,25 +147,53 @@ export async function cachedAppData(user: User): Promise<AppData | null> {
   };
 }
 
-async function upsertOrQueue(table: "records" | "trips" | "user_settings" | "exchange_rates" | "profiles", payload: Record<string, unknown>) {
-  if (navigator.onLine) {
-    const { error } = await supabase.from(table).upsert(payload);
-    if (!error) return;
+const editableFields: Record<string, string[]> = {
+  records: ["id", "user_id", "record_type", "content", "notes", "amount", "currency", "expense_category", "location", "event_at", "trip_id", "plan_status", "sort_order", "parent_plan_id", "transport_type", "transport_details", "schedule_details", "image_path"],
+  trips: ["id", "user_id", "name", "destination", "start_date", "end_date", "timezone", "archived_at"],
+  user_settings: ["user_id", "base_currency", "theme"],
+  profiles: ["user_id", "display_name", "avatar_url", "avatar_color", "has_seen_onboarding", "last_seen_version"],
+  exchange_rates: ["id", "user_id", "base_currency", "quote_currency", "rate", "rate_date", "source"]
+};
+const syncAdapter = {
+  currentOwner: async () => (await supabase.auth.getSession()).data.session?.user.id,
+  claim: claimMutation, finish: finishMutation, fail: failMutation,
+  write: async (item: Awaited<ReturnType<typeof queueMutation>>) => {
+    const payload = Object.fromEntries(Object.entries(item.payload).filter(([key]) => editableFields[item.table].includes(key)));
+    return await supabase.rpc("save_user_mutation", { p_table: item.table, p_payload: payload, p_expected_updated_at: item.expectedUpdatedAt, p_request_id: item.id });
   }
-  await queueMutation({ table, operation: "upsert", payload });
+};
+
+export async function inspectSyncConflict(item: PendingMutation) {
+  if (await syncAdapter.currentOwner() !== item.ownerId) throw new Error("账号已切换");
+  const inspected = (await listMutations(item.ownerId)).filter(old => !old.supersededBy && old.table === item.table && old.entityId === item.entityId);
+  const key = item.table === "profiles" || item.table === "user_settings" ? "user_id" : "id";
+  const { data: cloud, error } = await supabase.from(item.table).select("*").eq("user_id", item.ownerId).eq(key, item.entityId).maybeSingle();
+  if (error) throw error;
+  if (await syncAdapter.currentOwner() !== item.ownerId) throw new Error("账号已切换");
+  return { inspected, cloud: cloud as Record<string, unknown> | null };
 }
 
-export async function syncOutbox() {
+export async function resolveSyncConflict(review: Awaited<ReturnType<typeof inspectSyncConflict>>, choice: "cloud" | "local") {
+  const owner = review.inspected[0]?.ownerId;
+  if (!owner || await syncAdapter.currentOwner() !== owner) throw new Error("账号已切换");
+  const queued = await reconcileMutations(review.inspected, review.cloud, choice);
+  if (queued) {
+    const result = await replayMutation(queued, syncAdapter);
+    if (result?.state !== "confirmed") throw new Error("尚未确认保存；若云端再次变化，请重新比较冲突。本机副本已保留。");
+  }
+}
+async function upsertOrQueue(table: Awaited<ReturnType<typeof queueMutation>>["table"], payload: Record<string, unknown>, previous?: { updated_at: string }): Promise<SaveResult> {
+  const item = await queueMutation({ ownerId: String(payload.user_id), table, operation: "upsert", payload, expectedUpdatedAt: previous?.updated_at || null });
+  if (navigator.onLine) return await replayMutation(item, syncAdapter) || { state: "pending", row: payload };
+  return { state: "pending", row: payload };
+}
+
+export async function syncOutbox(ownerId: string) {
   if (!navigator.onLine) return 0;
   let synced = 0;
-  for (const item of await listMutations()) {
-    const query = item.operation === "delete"
-      ? supabase.from(item.table).delete().eq("id", String(item.payload.id))
-      : supabase.from(item.table).upsert(item.payload);
-    const { error } = await query;
-    if (error) break;
-    await removeMutation(item.id);
-    synced += 1;
+  for (const item of await listMutations(ownerId)) {
+    const result = await replayMutation(item, syncAdapter);
+    if (result?.state === "confirmed") synced += 1;
   }
   return synced;
 }
@@ -151,6 +217,7 @@ export function makeRecord(user: User, draft: RecordDraft): LifeRecord {
     parent_plan_id: draft.parent_plan_id || null,
     transport_type: draft.transport_type ?? null,
     transport_details: draft.transport_details ?? null,
+    ...(draft.schedule_details ? { schedule_details: normalizeScheduleDetails(draft.schedule_details) } : {}),
     actual_match_status: "never",
     actual_info: null,
     actual_info_matched: false,
@@ -179,20 +246,22 @@ export function makeTrip(user: User, draft: TripDraft): Trip {
   };
 }
 
-export async function persistRecord(record: LifeRecord) {
-  await upsertOrQueue("records", record as unknown as Record<string, unknown>);
+export async function persistRecord(record: LifeRecord, previous?: LifeRecord) {
+  const safe = previous ? invalidateChangedFlight(previous, record) : record;
+  const result = await upsertOrQueue("records", safe as unknown as Record<string, unknown>, previous);
+  return { ...result, row: normalizeRecord(result.row) as unknown as Record<string, unknown> };
 }
 
-export async function persistTrip(trip: Trip) {
-  await upsertOrQueue("trips", trip as unknown as Record<string, unknown>);
+export async function persistTrip(trip: Trip, previous?: Trip) {
+  return upsertOrQueue("trips", trip as unknown as Record<string, unknown>, previous);
 }
 
-export async function persistSettings(settings: UserSettings) {
-  await upsertOrQueue("user_settings", settings as unknown as Record<string, unknown>);
+export async function persistSettings(settings: UserSettings, previous?: UserSettings) {
+  return upsertOrQueue("user_settings", settings as unknown as Record<string, unknown>, previous);
 }
 
-export async function persistProfile(profile: UserProfile) {
-  await upsertOrQueue("profiles", profile as unknown as Record<string, unknown>);
+export async function persistProfile(profile: UserProfile, previous?: UserProfile) {
+  return upsertOrQueue("profiles", profile as unknown as Record<string, unknown>, previous);
 }
 
 export async function uploadAvatar(user: User, avatar: Blob) {
@@ -210,7 +279,8 @@ export async function uploadAvatar(user: User, avatar: Blob) {
 
 export async function persistRates(rates: ExchangeRate[]) {
   for (const rate of rates) {
-    await upsertOrQueue("exchange_rates", rate as unknown as Record<string, unknown>);
+    const result = await upsertOrQueue("exchange_rates", rate as unknown as Record<string, unknown>);
+    if (result.state === "failed" || result.state === "conflict") throw new Error(result.error);
   }
 }
 

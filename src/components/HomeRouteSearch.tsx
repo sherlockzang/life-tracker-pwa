@@ -4,6 +4,7 @@ import type { LifeRecord, MetroDetails, RecordDraft, Trip } from "../types";
 import { queryTransitRoute, TRANSIT_AI_ERROR } from "../lib/transitAi";
 import { transportTitle } from "../lib/transport";
 import { dateInZone, zonedDateTimeToIso } from "../lib/tripDates";
+import { flightTimeOptions, utcOffsetLabel } from "../../supabase/functions/_shared/flightTime";
 
 interface Props {
   trips: Trip[];
@@ -46,6 +47,11 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
   const initialTrip = availableTrips.find((trip) => trip.id === tripId) || availableTrips[0];
   const [planDate, setPlanDate] = useState(initialTrip ? defaultDate(initialTrip) : "");
   const [planTime, setPlanTime] = useState(currentTime());
+  const [localChoice, setLocalChoice] = useState<{ key: string; offset?: number }>({ key: "" });
+  const localKey = `${tripId}|${planDate}|${planTime}|${initialTrip?.timezone}`;
+  const localOffset = localChoice.key === localKey ? localChoice.offset : undefined;
+  let localOptions: ReturnType<typeof flightTimeOptions> = [];
+  try { if (initialTrip) localOptions = flightTimeOptions({ date: planDate, time: planTime, timezone: initialTrip.timezone }); } catch { /* Save reports invalid clocks, retaining the generated route. */ }
 
   function close() {
     setOpen(false);
@@ -89,7 +95,7 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
         record_type: "trip",
         content: transportTitle("metro", details),
         location: `${details.origin} → ${details.destination}`,
-        event_at: zonedDateTimeToIso(planDate, planTime, trip.timezone),
+        event_at: zonedDateTimeToIso(planDate, planTime, trip.timezone, localOffset),
         trip_id: trip.id,
         plan_status: "planned",
         sort_order: (sameDayCount + 1) * 1000,
@@ -112,6 +118,7 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
       <form className="home-route-query" onSubmit={query}><label><span><MapPin size={14} />出发地</span><input autoFocus value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="例如 UCSB 加大圣塔芭芭拉分校" maxLength={120} required /></label><label><span><Route size={14} />目的地</span><input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="例如 洛杉矶机场" maxLength={120} required /></label><button className="primary-button" disabled={loading || !origin.trim() || !destination.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{loading ? "正在规划…" : "查询路线"}</button></form>
       {error && <p className="field-error" role="alert">{error}</p>}
       {result && <div className="home-route-result"><div><Sparkles size={17} /><b>路线建议</b></div><p>{result}</p><small>AI 结果仅供规划参考，请以当地实时交通信息为准。</small></div>}
+      {result && showSave && localOptions.length > 1 && <label>重复当地时间 · 必选<select aria-label="重复当地时间" value={localOffset ?? ""} onChange={event => setLocalChoice({ key: localKey, offset: event.target.value === "" ? undefined : Number(event.target.value) })}><option value="" disabled>请选择第一次或第二次</option>{localOptions.map((option, index) => <option key={option.utcOffsetMinutes} value={option.utcOffsetMinutes}>{index === 0 ? "第一次" : "第二次"} · {utcOffsetLabel(option.utcOffsetMinutes)}</option>)}</select><small>夏令时结束时此时刻出现两次。选择后可直接保存，不需要重新查询 AI。</small></label>}
       {result && showSave && availableTrips.length > 0 && <div className="home-route-save"><label>保存到行程<select value={tripId} onChange={(event) => chooseTrip(event.target.value)}>{availableTrips.map((trip) => <option value={trip.id} key={trip.id}>{trip.name} · {trip.destination}</option>)}</select></label><div><label><span><CalendarDays size={14} />日期</span><input type="date" min={selectedTrip?.start_date} max={selectedTrip?.end_date} value={planDate} onChange={(event) => setPlanDate(event.target.value)} required /></label><label><span><Clock3 size={14} />时间</span><input type="time" value={planTime} onChange={(event) => setPlanTime(event.target.value)} required /></label></div><button className="primary-button" type="button" disabled={saving || !tripId || !planDate || !planTime} onClick={() => void saveRoute()}>{saving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}{saving ? "正在保存…" : "保存为行程计划"}</button></div>}
       {result && <footer className="home-route-actions"><button className="secondary-button" type="button" onClick={close}>仅供参考，不保存</button>{availableTrips.length > 0 ? !showSave && <button className="primary-button" type="button" onClick={() => setShowSave(true)}><Save size={16} />保存到某个行程</button> : <small>当前没有进行中或未来的行程，本次结果可以直接参考。</small>}</footer>}
     </section></div>}

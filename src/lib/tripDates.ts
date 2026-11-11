@@ -1,3 +1,5 @@
+import { flightTimeOptions, resolveFlightInstant } from "../../supabase/functions/_shared/flightTime";
+
 export function dateInZone(iso: string, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -9,18 +11,12 @@ export function dateInZone(iso: string, timeZone: string) {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-export function zonedDateTimeToIso(date: string, time: string, timeZone: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = (time || "09:00").split(":").map(Number);
-  const target = Date.UTC(year, month - 1, day, hour, minute, 0);
-  let guess = target;
-  for (let index = 0; index < 3; index += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
-    }).formatToParts(new Date(guess));
-    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
-    const representedAsUtc = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour") % 24, value("minute"), value("second"));
-    guess += target - representedAsUtc;
-  }
-  return new Date(guess).toISOString();
+export function zonedDateTimeToIso(date: string, time: string, timeZone: string, utcOffsetMinutes?: number, previousIso?: string) {
+  const stop = { date, time: time || "09:00", timezone: timeZone };
+  const options = flightTimeOptions(stop);
+  const previous = previousIso ? Date.parse(previousIso) : NaN;
+  const original = options.find(option => option.instant === Math.floor(previous / 60_000) * 60_000);
+  const instant = resolveFlightInstant({ ...stop, utc_offset_minutes: utcOffsetMinutes ?? original?.utcOffsetMinutes });
+  // A no-op edit keeps seconds and the occurrence of a repeated local clock.
+  return original?.instant === instant ? new Date(previous).toISOString() : new Date(instant).toISOString();
 }

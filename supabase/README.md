@@ -1,95 +1,15 @@
-# Supabase 配置
+# Supabase 运维入口
 
-## 数据库
+当前登录方式为邮箱6位验证码，不是Magic Link主流程。数据库、函数、配额和部署说明统一维护在以下文档，避免多份操作指引互相矛盾。
 
-1. 打开 Supabase 项目的 **SQL Editor**。
-2. 按文件名顺序运行 `migrations/` 中的 SQL 文件。
-3. 在 **Authentication → URL Configuration** 设置：
-   - Site URL：`https://sherlockzang.github.io/life-tracker-pwa/`
-   - Redirect URL：`https://sherlockzang.github.io/life-tracker-pwa/`
-   - 本地 Redirect URL：`http://localhost:3000/life-tracker-pwa/`
+- [数据库表、字段、RLS与初始化](../docs/DATABASE.md)
+- [API请求/响应和实际执行配额](../docs/API-CONTRACT.md)
+- [SMTP、Secrets、部署、备份和回滚](../docs/DEPLOYMENT-ROLLBACK.md)
+- [完整独立SQL参考](../docs/reference/SCHEMA-REFERENCE.md)
+- [完整独立后端及OTP模板参考](../docs/reference/EDGE-REFERENCE.md)
 
-迁移会创建个人记录、行程、交通模板、资料和更新记录所需的数据结构与 RLS，并配置头像与记录图片存储桶。
+空项目运行17个迁移，已有项目只运行未应用部分。V2最后7个增量包含全天/酒店、客户端CAS、航段版本、AI缓存恢复、原子限频、父计划反向约束与上海reset元数据修正；本次没有运行生产SQL。2026-10-02临时PG18的17迁移、旧数据升级、并发和权限验收已通过；发布前独立执行`node scripts/test-database-integrity.mjs`，并在测试Supabase补实际Auth/Storage/Deno集成验证。
 
-## 邮箱验证码登录
+真实秘密只配置到平台：AVIATIONSTACK_API_KEY、DEEPSEEK_API_KEY进入EdgeSecrets；ResendSMTP密码进入AuthSMTP设置。service_role不得进入VITE配置或公开仓库。
 
-Life Tracker 1.4.0 使用 Supabase Email OTP。新账号的 **Confirm signup** 模板和已有账号的 **Magic Link** 模板都必须显示 `{{ .Token }}`，不能只提供 `{{ .ConfirmationURL }}` 链接。仓库内对应模板为：
-
-- `templates/confirmation-otp.html`
-- `templates/magic-link-otp.html`
-
-用户收到 6 位数字验证码后直接在 PWA 内输入，因此 iOS 主屏幕 PWA 不需要通过 Safari 回传登录状态。
-
-## Aviationstack 航班查询
-
-航班查询使用服务端 Secret `AVIATIONSTACK_API_KEY`，由 `lookup-flight` Edge Function 代理。真实 Key 不得放进前端环境变量或提交到仓库。
-
-部署函数：
-
-```bash
-npx supabase login
-npx supabase link --project-ref ihqkgtmikwdakhyglels
-npx supabase secrets set AVIATIONSTACK_API_KEY=你的密钥 --project-ref ihqkgtmikwdakhyglels
-npx supabase functions deploy lookup-flight --project-ref ihqkgtmikwdakhyglels
-```
-
-未来航班只保存手动计划信息，不调用 Aviationstack。系统会按计划到达日期、当地时间和 IANA 时区换算 UTC；到达约一小时后至 48 小时内，用户可主动点击“匹配实际飞行信息”。服务端会重新读取用户记录并严格核对航班号、出发日期及起降机场，返回计划/实际对比预览，用户确认后才会保存。
-
-## DeepSeek 智能助手
-
-API Key 只保存在 Supabase Edge Function 的服务端环境中，绝不能写进 `VITE_*` 变量、前端源码或 GitHub 仓库。
-
-### 1. 申请 DeepSeek API Key
-
-1. 打开 <https://platform.deepseek.com/> 并登录。
-2. 进入 **API Keys** 页面，新建一个 Key。
-3. 复制并妥善保存 Key；根据 DeepSeek 控制台提示确认账户额度可用。
-
-### 2. 在 Supabase 保存密钥
-
-1. 打开项目 `ihqkgtmikwdakhyglels` 的 Supabase Dashboard。
-2. 左侧进入 **Edge Functions**，打开 **Secrets Management**。
-3. 新增 Secret：
-   - Key：`DEEPSEEK_API_KEY`
-   - Value：刚才复制的 DeepSeek API Key
-4. 点击 **Save**。保存后密钥会立即提供给已部署的函数，不需要重新发布网站。
-
-### 3. 部署 Edge Function
-
-仓库以通用 `deepseek-assist` 函数承载路线查询、记账解析、随记润色、旅行回顾与每日摘要；旧的 `query-transit-route` 仅作为向后兼容入口。可在项目根目录执行：
-
-```bash
-npx supabase login
-npx supabase link --project-ref ihqkgtmikwdakhyglels
-npx supabase functions deploy deepseek-assist query-transit-route --project-ref ihqkgtmikwdakhyglels
-```
-
-检查 Secret 是否存在：
-
-```bash
-npx supabase secrets list --project-ref ihqkgtmikwdakhyglels
-```
-
-也可以通过 Dashboard 的 Edge Functions 编辑器查看已部署函数，但应以仓库内代码为准，避免线上代码和版本记录不一致。
-
-### 4. 本地测试（选做）
-
-复制 `supabase/.env.example` 为一个不会提交的本地文件，例如 `supabase/.env.local`，填入真实 Key 后运行：
-
-```bash
-npx supabase functions serve deepseek-assist --env-file supabase/.env.local
-```
-
-正式账号需要先登录 Life Tracker；演示模式使用按设备延续的短期服务端会话。函数会验证身份、执行原子配额和频率保护、限制输入输出长度，并在 DeepSeek 不可用时让前端回退为手动填写。旅行回顾会先在服务端汇总消费与地点，并最多抽样 20 条随记，不会把整段原始行程直接发送给模型。
-
-## v1.3.0 Edge Functions
-
-```bash
-npx supabase functions deploy deepseek-assist start-demo-session redeem-invite get-api-quota lookup-flight query-transit-route --project-ref ihqkgtmikwdakhyglels
-```
-
-- `deepseek-assist`：统一 AI action 分发、固定 system prompt、额度与缓存
-- `start-demo-session`：生成并轮换按设备延续的演示 token
-- `redeem-invite`：服务端散列验证与 Friend 权限兑换
-- `get-api-quota`：返回当前账号可展示的额度快照
-- `lookup-flight`：完成时间校验、精确匹配、并发锁和预览确认
+Owner绑定受控AuthUUID，不靠邀请码。原迁移中历史Owner/邀请哈希不应直接作为新项目身份初始化。全部步骤及新Owner授权SQL见数据库文档。

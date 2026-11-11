@@ -15,6 +15,8 @@ export interface FlightStop {
   iata?: string;
   terminal: string;
   timezone?: string;
+  /** Explicit UTC offset for a repeated local clock (minutes east of UTC). */
+  utc_offset_minutes?: number;
 }
 
 export interface FlightDetails {
@@ -74,6 +76,15 @@ export interface MetroDetails {
 
 export type TransportDetails = FlightDetails | RailDetails | MetroDetails;
 
+export interface ScheduleDetails {
+  kind: "all_day" | "hotel";
+  start_date: string;
+  end_date: string;
+  check_in_time?: string;
+  check_out_time?: string;
+  booking_reference?: string;
+}
+
 export interface UserSettings {
   user_id: string;
   base_currency: Currency;
@@ -130,12 +141,16 @@ export interface LifeRecord {
   parent_plan_id: string | null;
   transport_type: TransportType | null;
   transport_details: TransportDetails | null;
+  schedule_details?: ScheduleDetails | null;
   actual_match_status: ActualMatchStatus;
   actual_info: ActualFlightInfo | null;
   actual_info_matched: boolean;
   actual_matched_at: string | null;
   actual_match_provider: string | null;
   actual_match_request_id: string | null;
+  actual_confirmed_request_id?: string | null;
+  flight_plan_version?: number;
+  actual_match_plan_version?: number | null;
   image_path: string | null;
   created_at: string;
   updated_at: string;
@@ -205,6 +220,7 @@ export interface RecordDraft {
   parent_plan_id?: string;
   transport_type?: TransportType;
   transport_details?: TransportDetails;
+  schedule_details?: ScheduleDetails;
 }
 
 export interface TripDraft {

@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { CalendarRange, ChevronRight, CircleUserRound, Cloud, CloudOff, ListFilter, LoaderCircle, MapPinned, NotebookPen, Plane, Plus, ReceiptText, Route, Settings, Sparkles, WifiOff } from "lucide-react";
 import { supabase } from "./lib/supabase";
-import { cachedAppData, defaultProfile, defaultSettings, fetchAppData, makeRecord, makeTrip, persistProfile, persistRecord, persistSettings, persistTrip, refreshRates, syncOutbox, updateCachedData, uploadAvatar, type AppData } from "./lib/data";
+import { cachedAppData, defaultProfile, defaultSettings, fetchAppData, makeRecord, makeTrip, normalizeRecord, persistProfile, persistRecord, persistSettings, persistTrip, refreshRates, syncOutbox, updateCachedData, uploadAvatar, type AppData } from "./lib/data";
 import type { Currency, LifeRecord, RecordDraft, RecordType, TripDraft, UserProfile, UserSettings } from "./types";
 import { LoginScreen } from "./components/LoginScreen";
 import { QuickComposer } from "./components/QuickComposer";
@@ -14,9 +14,12 @@ import { BrandLogo } from "./components/BrandLogo";
 import { Onboarding, WhatsNew } from "./components/GuidanceOverlays";
 import { DEMO_USER, loadDemoData, resetDemoData, saveDemoData } from "./lib/demo";
 import { startDemoSession } from "./lib/account";
-import { generateDailySummary } from "./lib/ai";
-import { dateInZone } from "./lib/tripDates";
+import { AI_RECOVERY_CHANGED, generateDailySummary, pendingAiRecoveries, retryAiPersistence, type PendingAiRecovery } from "./lib/ai";
+import { activeTrip, plansForDay, tripDayNumber, tripToday, validTimeZone } from "./lib/calendar";
+import { claimAutomaticSummary, loadAutomaticSummary, saveAutomaticSummary, listMutations, OUTBOX_CHANGED, retryFailedMutations, type PendingMutation } from "./lib/offline";
+import type { SaveResult } from "./lib/syncEngine";
 import { HomeRouteSearch } from "./components/HomeRouteSearch";
+import { SyncStatusDialog } from "./components/SyncStatusDialog";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -45,6 +48,12 @@ export default function App() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [plannerTripId, setPlannerTripId] = useState<string | undefined>();
   const [dailySummary, setDailySummary] = useState("");
+  const [clockNow, setClockNow] = useState(() => new Date());
+  const [syncItems, setSyncItems] = useState<PendingMutation[]>([]);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [showSyncIssues, setShowSyncIssues] = useState(false);
+  const activeOwner = useRef<string | undefined>(undefined);
+  const summaryRequests = useRef(new Map<string, ReturnType<typeof generateDailySummary>>());
 
   useEffect(() => {
     let mounted = true;
@@ -76,19 +85,25 @@ export default function App() {
   }, []);
 
   const user = demoMode ? DEMO_USER : session?.user || null;
+  activeOwner.current = user?.id;
+  const ownerSyncItems = syncItems.filter(item => item.ownerId === user?.id);
+  const currentSyncItems = ownerSyncItems.filter(item => !item.supersededBy);
+  const aiCopies: PendingAiRecovery[] = user && !demoMode ? pendingAiRecoveries(user.id) : [];
 
   useEffect(() => {
+    setCloudReady(false);
     if (!user) { setData(null); return; }
     if (demoMode) { setData(loadDemoData()); setLoading(false); setLoadError(""); return; }
     let cancelled = false;
     setLoading(true); setLoadError("");
     void (async () => {
-      const cached = await cachedAppData(user);
-      if (cached && !cancelled) setData(cached);
+      let cached: AppData | null = null;
       try {
-        await syncOutbox();
+        cached = await cachedAppData(user);
+        if (cached && !cancelled) setData(cached);
+        await syncOutbox(user.id);
         const fresh = await fetchAppData(user);
-        if (!cancelled) setData(fresh);
+        if (!cancelled) { setData(fresh); setCloudReady(true); }
       } catch (error) {
         if (!cached && !cancelled) setData({ records: [], trips: [], rates: [], settings: defaultSettings(user.id), profile: defaultProfile(user), changelogs: [] });
         if (!cancelled) setLoadError(error instanceof Error ? error.message : "暂时无法读取云端数据");
@@ -100,17 +115,35 @@ export default function App() {
   }, [user, demoMode]);
 
   useEffect(() => {
+    let cancelled = false;
     const onOnline = async () => {
-      setOnline(true);
-      const count = await syncOutbox();
-      if (count) showToast(`${count} 条离线记录已同步`);
+      setOnline(navigator.onLine);
+      setClockNow(new Date());
+      if (!navigator.onLine || !user || demoMode) return;
+      try {
+        const count = await syncOutbox(user.id);
+        const fresh = await fetchAppData(user);
+        if (cancelled || activeOwner.current !== user.id) return;
+        setData(fresh); setCloudReady(true); setLoadError("");
+        if (count) showToast(`${count} 条本地记录已同步到云端`);
+      } catch { if (!cancelled) setCloudReady(false); }
     };
     const onOffline = () => setOnline(false);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     window.addEventListener("focus", onOnline);
-    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); window.removeEventListener("focus", onOnline); };
-  }, []);
+    const onVisible = () => { if (document.visibilityState === "visible") void onOnline(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); window.removeEventListener("focus", onOnline); document.removeEventListener("visibilitychange", onVisible); };
+  }, [user, demoMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => { const items = user && !demoMode ? await listMutations(user.id) : []; if (!cancelled) setSyncItems(items); };
+    void refresh(); window.addEventListener(OUTBOX_CHANGED, refresh); window.addEventListener(AI_RECOVERY_CHANGED, refresh);
+    return () => { cancelled = true; window.removeEventListener(OUTBOX_CHANGED, refresh); window.removeEventListener(AI_RECOVERY_CHANGED, refresh); };
+  }, [user, demoMode]);
+  useEffect(() => { const timer = window.setInterval(() => setClockNow(new Date()), 30_000); return () => window.clearInterval(timer); }, []);
 
   useEffect(() => {
     const theme = data?.settings.theme || "system";
@@ -125,54 +158,69 @@ export default function App() {
 
   const updateData = useCallback((recipe: (current: AppData) => AppData) => {
     setData((current) => {
-      if (!current || !user) return current;
+      if (!current || !user || activeOwner.current !== user.id || current.profile.user_id !== user.id) return current;
       const next = recipe(current);
       if (demoMode) saveDemoData(next);
-      else void updateCachedData(user.id, next);
+      else void updateCachedData(user.id, next).catch(() => showToast("设备缓存未写入，请勿关闭未同步草稿"));
       return next;
     });
   }, [user, demoMode]);
 
+  function savedRow<T>(result: SaveResult, ownerId: string): T {
+    if (activeOwner.current !== ownerId) throw new Error("账号已切换，请在原账号中查看保存结果");
+    if (result.state === "failed" || result.state === "conflict") throw new Error(result.error);
+    if (result.state === "pending") showToast("已保存在此设备，等待云端确认；请勿清理网站数据");
+    return result.row as T;
+  }
+
   async function saveRecord(draft: RecordDraft) {
     if (!user || !data) return;
     const record = makeRecord(user, draft);
-    updateData((current) => ({ ...current, records: [record, ...current.records] }));
-    if (!demoMode) await persistRecord(record);
-    showToast(online ? "已记下来" : "已离线保存，联网后同步");
+    const result = demoMode ? null : await persistRecord(record);
+    const saved = result ? savedRow<LifeRecord>(result, user.id) : record;
+    updateData((current) => ({ ...current, records: [saved, ...current.records] }));
+    if (!result || result.state === "confirmed") showToast(demoMode ? "已保存到本地演示" : "已保存到云端");
   }
 
-  async function updateRecord(record: LifeRecord) {
-    updateData((current) => ({ ...current, records: current.records.map((item) => item.id === record.id ? record : item) }));
-    if (!demoMode) await persistRecord(record);
+  async function updateRecord(record: LifeRecord, serverConfirmed = false) {
+    if (!user || record.user_id !== user.id) throw new Error("账号不匹配");
+    try {
+      const previous = data?.records.find((item) => item.id === record.id);
+      const saved = demoMode || serverConfirmed ? normalizeRecord(record as unknown as Record<string, unknown>) : savedRow<LifeRecord>(await persistRecord(record, previous), user.id);
+      if (activeOwner.current !== user.id) return;
+      updateData((current) => ({ ...current, records: current.records.map((item) => item.id === record.id ? saved : item) }));
+    } catch (error) { showToast(error instanceof Error ? error.message : "保存失败，本地副本已保留"); throw error; }
   }
 
   async function saveTrip(draft: TripDraft) {
     if (!user) throw new Error("尚未登录");
     const trip = makeTrip(user, draft);
-    updateData((current) => ({ ...current, trips: [trip, ...current.trips] }));
-    if (!demoMode) await persistTrip(trip);
-    showToast("行程已创建");
-    return trip;
+    const saved = demoMode ? trip : savedRow<ReturnType<typeof makeTrip>>(await persistTrip(trip), user.id);
+    updateData((current) => ({ ...current, trips: [saved, ...current.trips] }));
+    return saved;
   }
 
   async function updateTrip(trip: ReturnType<typeof makeTrip>) {
-    updateData((current) => ({ ...current, trips: current.trips.map((item) => item.id === trip.id ? trip : item) }));
-    if (!demoMode) await persistTrip(trip);
-    showToast("行程已更新");
+    if (!user) throw new Error("尚未登录");
+    const saved = demoMode ? trip : savedRow<ReturnType<typeof makeTrip>>(await persistTrip(trip, data?.trips.find((item) => item.id === trip.id)), user.id);
+    updateData((current) => ({ ...current, trips: current.trips.map((item) => item.id === trip.id ? saved : item) }));
   }
 
   async function updateSettings(settings: UserSettings) {
-    updateData((current) => ({ ...current, settings }));
-    if (!demoMode) await persistSettings(settings);
-    showToast("设置已保存");
+    if (!user) return;
+    try {
+      const saved = demoMode ? settings : savedRow<UserSettings>(await persistSettings(settings, data?.settings), user.id);
+      updateData((current) => ({ ...current, settings: saved }));
+    } catch (error) { showToast(error instanceof Error ? error.message : "设置保存失败"); }
   }
 
   async function updateProfile(profile: UserProfile, avatar?: Blob, message = "资料已保存") {
     if (!user) return;
     const nextProfile = avatar && !demoMode ? { ...profile, avatar_url: await uploadAvatar(user, avatar), updated_at: new Date().toISOString() } : profile;
-    updateData((current) => ({ ...current, profile: nextProfile }));
-    if (!demoMode) await persistProfile(nextProfile);
-    if (message) showToast(message);
+    const result = demoMode ? null : await persistProfile(nextProfile, data?.profile);
+    const saved = result ? savedRow<UserProfile>(result, user.id) : nextProfile;
+    updateData((current) => ({ ...current, profile: saved }));
+    if (message && (!result || result.state === "confirmed")) showToast(message);
   }
 
   async function handleRateRefresh() {
@@ -193,28 +241,47 @@ export default function App() {
   }
 
   const currentTrip = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return data?.trips.find((trip) => trip.start_date <= today && trip.end_date >= today);
-  }, [data?.trips]);
+    return activeTrip(data?.trips || [], clockNow);
+  }, [data?.trips, clockNow]);
+  const summaryDay = currentTrip ? `${currentTrip.id}:${tripToday(currentTrip, clockNow)}` : "";
+  const summaryContext = JSON.stringify((data?.trips || []).filter(trip => { const today = tripToday(trip, clockNow); return trip.start_date <= today && trip.end_date >= today; }).map(trip => [trip.id, tripToday(trip, clockNow), trip.timezone]).sort((a, b) => a[0].localeCompare(b[0])));
+  useEffect(() => setDailySummary(""), [summaryDay, summaryContext, user?.id]);
 
   useEffect(() => {
-    if (!data || !currentTrip || demoMode || !online || dailySummary) return;
-    const today = dateInZone(new Date().toISOString(), currentTrip.timezone);
-    const hasPlans = data.records.some((record) => record.trip_id === currentTrip.id && record.record_type === "trip" && record.plan_status === "planned" && dateInZone(record.event_at, currentTrip.timezone) === today);
+    const ownerId = user?.id;
+    if (!ownerId || !data || data.profile.user_id !== ownerId || !currentTrip || !validTimeZone(currentTrip.timezone) || demoMode || !online || dailySummary) return;
+    const hasPlans = plansForDay(data.records, currentTrip, tripToday(currentTrip, clockNow)).some(record => record.plan_status === "planned");
     if (!hasPlans) return;
     let cancelled = false;
-    void generateDailySummary().then((result) => { if (!cancelled && !result.skipped && result.result) setDailySummary(result.result); }).catch(() => undefined);
+    const requestKey = `${ownerId}:${summaryContext}`;
+    let request = summaryRequests.current.get(requestKey);
+    if (!request) {
+      request = (async () => {
+        const cached = await loadAutomaticSummary(ownerId, summaryContext);
+        if (activeOwner.current !== ownerId) return { action: "daily_summary" as const, skipped: true, result: "" };
+        if (cached) return { action: "daily_summary" as const, result: cached };
+        if (!await claimAutomaticSummary(ownerId, summaryContext) || activeOwner.current !== ownerId) return { action: "daily_summary" as const, skipped: true, result: "" };
+        const result = await generateDailySummary(summaryContext);
+        if (result.result && !result.skipped) {
+          try { await saveAutomaticSummary(ownerId, summaryContext, result.result); }
+          catch { return { ...result, warning: [result.warning, "摘要已生成，但本机暂时无法缓存；刷新后可能需要在设置中手动查看。"].filter(Boolean).join("；") }; }
+        }
+        return result;
+      })().finally(() => summaryRequests.current.delete(requestKey));
+      summaryRequests.current.set(requestKey, request);
+    }
+    void request.then((result) => { if (!cancelled && activeOwner.current === ownerId && !result.skipped && result.result) { setDailySummary(result.result); if (result.warning) showToast(result.warning); } }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [currentTrip, dailySummary, data, demoMode, online]);
+  }, [clockNow, currentTrip, dailySummary, data, demoMode, online, summaryContext, user?.id]);
 
-  const currentDay = currentTrip ? Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(`${currentTrip.start_date}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
+  const currentDay = currentTrip ? tripDayNumber(currentTrip, clockNow) : 0;
   const pendingChangelog = data?.profile.has_seen_onboarding
     ? data.changelogs.find((item) => isVersionNewer(item.version, data.profile.last_seen_version))
     : undefined;
 
   if (!authReady) return <LoadingScreen label="正在打开你的记录空间" />;
   if (!user) return <LoginScreen onStartDemo={async () => { await startDemoSession(); localStorage.setItem("life-tracker-demo-active", "true"); setDemoMode(true); setData(loadDemoData()); }} />;
-  if (!data) return <LoadingScreen label="正在整理你的时间线" />;
+  if (!data || data.profile.user_id !== user.id) return <LoadingScreen label="正在整理你的时间线" />;
 
   return (
     <div className="app-shell">
@@ -225,30 +292,32 @@ export default function App() {
           <button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><CalendarRange size={17} />行程规划</button>
         </nav>
         <div className="header-actions">
-          <span className={`connection ${online ? "online" : "offline"}`}>{online ? <Cloud size={15} /> : <CloudOff size={15} />}{demoMode ? "本地演示" : online ? "已同步" : "离线"}</span>
+          <button className={`connection ${online ? "online" : "offline"} ${demoMode ? "demo" : ""}`} onClick={() => setShowSyncIssues(true)}>{online ? <Cloud size={15} /> : <CloudOff size={15} />}{demoMode ? "本地演示" : currentSyncItems.some(item => item.state === "failed" || item.state === "conflict") || aiCopies.length ? `同步待处理 ${currentSyncItems.length + aiCopies.length}` : currentSyncItems.length ? `待同步 ${currentSyncItems.length}` : !online ? "离线" : cloudReady ? "已同步" : "未确认云端"}</button>
           <button className={`icon-button ${view === "settings" ? "active" : ""}`} aria-label="设置" onClick={() => setView("settings")}><Settings size={19} /></button>
           <ProfileAvatar profile={data.profile} className="mini-avatar" />
         </div>
       </header>
 
       {!online && <div className="offline-banner"><WifiOff size={15} />当前离线。你仍可查看缓存并记录，联网后会自动同步。</div>}
-      {loadError && <div className="setup-banner"><b>云端数据表尚未就绪</b><span>当前可以预览界面；运行仓库中的 Supabase migration 后即可正常保存。</span></div>}
+      {loadError && <div className="setup-banner"><b>暂未确认云端数据</b><span>{loadError}。本地副本会保留，请检查网络、权限或数据库迁移。</span></div>}
+      {data.trips.some(trip => !validTimeZone(trip.timezone)) && <div className="setup-banner"><b>有行程使用了无效时区</b><span>请进入行程编辑，重新选择标准时区。首页日期暂按 UTC 显示，修正前请勿依赖自动日期匹配。</span></div>}
 
       <main className="app-main">
         {view === "timeline" && (
           <>
             {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{dailySummary || `${currentTrip.destination}，今天也去留下一点什么吧。`}</p></div><ChevronRight /></button>}
+            {currentTrip && !demoMode && !dailySummary && <p className="field-help">今日摘要在此设备自动尝试一次；若未生成，可在设置中手动生成。</p>}
             <div className="home-quick-grid"><QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} /><HomeRouteSearch trips={data.trips} records={data.records} isDemo={demoMode} onSave={saveRecord} /></div>
             <div className="filter-row">
               <div className="filter-tabs" role="tablist">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
               <button className="planner-link" onClick={() => setView("planner")}><MapPinned size={16} />行程规划<ChevronRight size={15} /></button>
             </div>
             {filter === "expense" && <Suspense fallback={<div className="chart-loading glass-card"><LoaderCircle className="spin" />正在整理消费统计…</div>}><ExpenseStats records={data.records} rates={data.rates} baseCurrency={data.settings.base_currency} refreshing={refreshingRates} onRefresh={handleRateRefresh} /></Suspense>}
-            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() })} />
+            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} isDemo={demoMode} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() }).catch(() => undefined)} />
           </>
         )}
         {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
-        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} isDemo={demoMode} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onResetDemo={() => { const next = resetDemoData(); setData(next); showToast("演示数据已重置"); }} onSignOut={() => { if (demoMode) { localStorage.removeItem("life-tracker-demo-active"); setDemoMode(false); setData(null); } else void supabase.auth.signOut(); }} />}
+        {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} isDemo={demoMode} summaryContext={summaryContext} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onResetDemo={() => { const next = resetDemoData(); setData(next); showToast("演示数据已重置"); }} onSignOut={() => { if (demoMode) { localStorage.removeItem("life-tracker-demo-active"); setDemoMode(false); setData(null); } else void supabase.auth.signOut(); }} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
@@ -257,6 +326,7 @@ export default function App() {
       <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
 
       {toast && <div className="toast" role="status" aria-live="polite"><Sparkles size={15} />{toast}</div>}
+      {showSyncIssues && <SyncStatusDialog key={user.id} items={ownerSyncItems} aiCopies={aiCopies} online={online} cloudReady={cloudReady} isDemo={demoMode} onClose={() => setShowSyncIssues(false)} onResolved={async () => { const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetrySave={async () => { if (!user) return; await retryFailedMutations(user.id); await syncOutbox(user.id); const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetryAi={async () => { if (!user) return; const result = await retryAiPersistence(user.id); if (activeOwner.current !== user.id) return; if (result.errors.length) throw new Error(result.errors.join("；")); showToast(`${result.saved} 份 AI 结果已保存，没有重新调用 AI`); }} />}
       {loading && <div className="sync-loader" role="status" aria-live="polite"><LoaderCircle className="spin" size={14} />正在同步</div>}
       {!data.profile.has_seen_onboarding && <Onboarding onComplete={() => updateProfile({ ...data.profile, has_seen_onboarding: true, updated_at: new Date().toISOString() }, undefined, "")} />}
       {data.profile.has_seen_onboarding && pendingChangelog && <WhatsNew changelog={pendingChangelog} onDismiss={() => updateProfile({ ...data.profile, last_seen_version: pendingChangelog.version, updated_at: new Date().toISOString() }, undefined, "")} />}

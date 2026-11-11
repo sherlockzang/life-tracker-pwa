@@ -45,6 +45,7 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
   const [eventAt, setEventAt] = useState(nowLocalInput());
   const [tripId, setTripId] = useState(forcedTripId || "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [expensePreview, setExpensePreview] = useState<ParsedExpense | null>(null);
@@ -67,8 +68,9 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!content.trim() || (type === "expense" && !amount)) return;
-    setSaving(true);
-    await onSave({
+    setSaving(true); setSaveError("");
+    try {
+      await onSave({
       record_type: type,
       content,
       notes,
@@ -80,10 +82,14 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
       trip_id: forcedTripId || tripId || undefined,
       plan_status: type === "trip" && (forcedTripId || tripId) ? "planned" : undefined,
       parent_plan_id: parentPlanId
-    });
-    setSaving(false);
-    reset();
-    if (compact) onClose?.();
+      });
+      reset();
+      if (compact) onClose?.();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "保存未完成，输入内容已保留，请核对后重试。");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function runAi() {
@@ -91,8 +97,8 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
     if (Array.from(content.trim()).length > 200) { setAiError("内容较长，建议直接手动填写，AI 识别更适合简短描述"); return; }
     setAiLoading(true); setAiError("");
     try {
-      if (type === "expense") setExpensePreview((await parseExpense(content.trim(), isDemo)).result);
-      if (type === "note") setPolishPreview((await polishNote(content.trim(), isDemo)).result);
+      if (type === "expense") { const result = await parseExpense(content.trim(), isDemo); setExpensePreview(result.result); setAiError(result.warning || ""); }
+      if (type === "note") { const result = await polishNote(content.trim(), isDemo); setPolishPreview(result.result); setAiError(result.warning || ""); }
     } catch (error) { setAiError(error instanceof Error ? error.message : "AI 功能暂时不可用"); }
     finally { setAiLoading(false); }
   }
@@ -151,6 +157,7 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
         {!forcedTripId && trips.length > 0 && <label className="soft-field"><Route size={16} /><select value={tripId} onChange={(event) => setTripId(event.target.value)}><option value="">不关联行程</option>{trips.map((trip) => <option value={trip.id} key={trip.id}>{trip.name}</option>)}</select></label>}
       </div>
       <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="补充备注（选填）" rows={2} />
+      {saveError && <p className="field-error" role="alert">{saveError}</p>}
       <div className="composer-actions">
         <span>{isDemo ? "演示记录只保存在当前设备" : navigator.onLine ? "将保存到你的私人空间" : "当前离线，将在联网后同步"}</span>
         <button className="primary-button" disabled={saving || !content.trim() || (type === "expense" && !amount)}>{saving ? "保存中…" : "记下来"}<Send size={16} /></button>

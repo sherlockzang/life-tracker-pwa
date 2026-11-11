@@ -7,6 +7,8 @@ import { APP_VERSION } from "../version";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { generateDailySummary } from "../lib/ai";
 import { getApiQuota, getOwnerManagedUsers, redeemInvite, setOwnerManagedUserTier } from "../lib/account";
+import { AVATAR_COLORS } from "../lib/designTokens";
+import { SettingsRow } from "./ui";
 
 interface Props {
   user: User;
@@ -14,6 +16,7 @@ interface Props {
   profile: UserProfile;
   changelogs: Changelog[];
   online: boolean;
+  summaryContext?: string;
   onUpdate: (settings: UserSettings) => void;
   onUpdateProfile: (profile: UserProfile, avatar?: Blob) => Promise<void>;
   onSignOut: () => void;
@@ -21,9 +24,7 @@ interface Props {
   onResetDemo?: () => void;
 }
 
-const AVATAR_COLORS = ["#0A84FF", "#1C1C1E", "#3A3A3C", "#636366", "#8E8E93", "#D1D1D6"];
-
-export function SettingsPanel({ user, settings, profile, changelogs, online, onUpdate, onUpdateProfile, onSignOut, isDemo = false, onResetDemo }: Props) {
+export function SettingsPanel({ user, settings, profile, changelogs, online, summaryContext, onUpdate, onUpdateProfile, onSignOut, isDemo = false, onResetDemo }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [showingReleaseHistory, setShowingReleaseHistory] = useState(false);
   const [showingUsageGuide, setShowingUsageGuide] = useState(false);
@@ -53,7 +54,7 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
 
   async function loadDailySummary() {
     setSummaryLoading(true); setSummary("");
-    try { const result = await generateDailySummary(); setSummary(result.skipped ? "今天没有待进行的行程计划，不会调用 AI。" : result.result); }
+    try { const result = await generateDailySummary(summaryContext); setSummary(result.skipped ? "今天没有待进行的行程计划，不会调用 AI。" : [result.result, result.warning].filter(Boolean).join("\n\n")); }
     catch (error) { setSummary(error instanceof Error ? error.message : "今日摘要暂时不可用"); }
     finally { setSummaryLoading(false); }
   }
@@ -72,11 +73,11 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             <div className="theme-options">{([{"value":"system","label":"跟随系统","icon":Smartphone},{"value":"dark","label":"深色","icon":Moon},{"value":"light","label":"浅色","icon":Sun}] as const).map((item) => { const Icon = item.icon; return <button className={settings.theme === item.value ? "active" : ""} onClick={() => update({ theme: item.value as ThemeMode })} key={item.value}><Icon /><span>{item.label}</span>{settings.theme === item.value && <Check size={16} />}</button>; })}</div>
           </section>
           <section className="settings-card glass-card">
-            <button className="settings-row" disabled={isDemo || summaryLoading} onClick={() => void loadDailySummary()}><span className="settings-icon coral"><Bell /></span><div><b>今日计划摘要</b><small>{isDemo ? "演示模式暂不开放" : "当天首次打开时按需生成并缓存"}</small></div>{summaryLoading ? <LoaderCircle className="spin" /> : <ChevronRight />}</button>
+            <SettingsRow icon={Bell} title="今日计划摘要" description={isDemo ? "演示模式暂不开放" : "当天首次打开时按需生成并缓存"} disabled={isDemo || summaryLoading} onClick={() => void loadDailySummary()} trailing={summaryLoading ? <LoaderCircle className="spin" /> : <ChevronRight />} />
             {summary && <div className="daily-summary"><Sparkles size={16} /><p>{summary}</p></div>}
-            <button className="settings-row" onClick={() => setShowingUsageGuide(true)}><span className="settings-icon violet"><BookOpen /></span><div><b>使用说明</b><small>快速记录、交通模板与 AI 路线查询</small></div><ChevronRight /></button>
-            <button className="settings-row" onClick={() => setShowingReleaseHistory(true)}><span className="settings-icon blue"><History /></span><div><b>更新记录</b><small>查看 Life Tracker 的所有版本与新功能</small></div><em>v{APP_VERSION}</em><ChevronRight /></button>
-            <button className="settings-row" onClick={() => setShowingPrivacy(true)}><span className="settings-icon green"><ShieldCheck /></span><div><b>隐私与数据</b><small>所有云端数据均受账号隔离保护</small></div><ChevronRight /></button>
+            <SettingsRow icon={BookOpen} title="使用说明" description="快速记录、交通模板与 AI 路线查询" onClick={() => setShowingUsageGuide(true)} trailing={<ChevronRight />} />
+            <SettingsRow icon={History} title="更新记录" description="查看 Life Tracker 的所有版本与新功能" onClick={() => setShowingReleaseHistory(true)} trailing={<><em>v{APP_VERSION}</em><ChevronRight /></>} />
+            <SettingsRow icon={ShieldCheck} title="隐私与数据" description="所有云端数据均受账号隔离保护" onClick={() => setShowingPrivacy(true)} trailing={<ChevronRight />} />
           </section>
           <section className="settings-card glass-card smart-service-card">
             <header><span className="settings-icon violet"><Bot /></span><div><h2>智能服务与权限</h2><p>额度按北京时间重置，记录与手动编辑始终不受影响</p></div></header>
@@ -102,11 +103,11 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, onU
             <span className="edit-profile-link"><Pencil size={13} />编辑资料</span>
           </button>
           <p><Mail size={14} />{user.email}</p>
-          <div className={`sync-state ${online ? "online" : "offline"}`}><Cloud size={17} /><span><b>{isDemo ? "本地演示模式" : online ? "云端已连接" : "离线模式"}</b><small>{isDemo ? "不会读取或写入真实账号数据" : online ? "记录会自动同步" : "恢复网络后自动同步"}</small></span></div>
+          <div className={`sync-state ${online ? "online" : "offline"}`}><Cloud size={17} /><span><b>{isDemo ? "本地演示模式" : online ? "网络可用" : "离线模式"}</b><small>{isDemo ? "不会读取或写入真实账号数据" : online ? "云端确认与待处理副本请查看顶部状态" : "恢复网络后自动同步"}</small></span></div>
           <button className="signout-button" onClick={onSignOut}><LogOut size={17} />{isDemo ? "退出演示" : "退出登录"}</button>
         </aside>
       </div>
-      <footer className="app-footer settings-footer"><span>版本 {APP_VERSION}</span><span>© 2026 Sherlock Zang. 联系邮箱：sherlockzang8818@gmail.com</span></footer>
+      <footer className="app-footer settings-footer"><span>版本 {APP_VERSION}</span><span>© 2026 Sherlock Zang.</span></footer>
       {editingProfile && <ProfileEditor profile={profile} isDemo={isDemo} onClose={() => setEditingProfile(false)} onSave={onUpdateProfile} />}
       {showingUsageGuide && <UsageGuide onClose={() => setShowingUsageGuide(false)} />}
       {showingReleaseHistory && <ReleaseHistory changelogs={changelogs} onClose={() => setShowingReleaseHistory(false)} />}

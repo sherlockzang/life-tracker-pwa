@@ -1,11 +1,27 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { admin, ApiError, authenticatedUser, completeUsage, demoSession, errorResponse, json, preflight, readJson, requestOrigin, reserveQuota, stringField } from "../_shared/api.ts";
+import { admin, ApiError, authenticatedUser, completeUsage, demoSession, errorResponse, json, preflight, readJson, requestOrigin, reserveQuota, sha256, stringField } from "../_shared/api.ts";
+import { activeSummaryTrips, aggregateExpenseCurrencies, dailySummaryContext, dateInZone, projectDailyPlans, type SummaryRecord, type SummaryTrip } from "../_shared/aiData.ts";
+import { signRecoveryToken, verifyRecoveryToken } from "../_shared/recovery.ts";
+import { fetchJsonWithTimeout } from "../_shared/upstream.ts";
+import { readAllPages } from "../_shared/pagination.ts";
 
 type Action = "route" | "expense_parse" | "note_polish" | "trip_recap" | "daily_summary";
 type Principal = { userId?: string; demoSessionId?: string; tier: "demo" | "user" };
 
 const ACTIONS = new Set<Action>(["route", "expense_parse", "note_polish", "trip_recap", "daily_summary"]);
 const REQUEST_TIMEOUT_MS = 24_000;
+const RECOVERY_SCOPE = "deepseek-result:v1";
+
+interface Prepared {
+  prompt?: string; cached?: boolean; skipped?: boolean; content?: string;
+  generatedAt?: string; tripId?: string; snapshotHash?: string; date?: string; contextKey?: string;
+}
+
+interface RecoveryPayload extends Record<string, unknown> {
+  userId: string; requestId: string; action: Action; content: string; generatedAt: string;
+  tripId?: string; snapshotHash?: string; date?: string; contextKey?: string;
+  usage?: Record<string, unknown>;
+}
 
 const ACTION_CONFIG: Record<Action, { maxTokens: number; system: string; json?: boolean }> = {
   route: {
@@ -23,11 +39,11 @@ const ACTION_CONFIG: Record<Action, { maxTokens: number; system: string; json?: 
   },
   trip_recap: {
     maxTokens: 800,
-    system: "你是私人旅行回顾写作助手。仅依据服务端提供的聚合统计和少量抽样随记，写一篇温暖、克制、真实的简体中文旅行回顾。不得杜撰未提供的地点或经历。包含一个简短的“消费小结”小节，指出最高消费分类和占比等已提供数据。控制在700个中文字符以内。"
+    system: "你是私人旅行回顾写作助手。仅依据服务端提供的聚合统计和少量抽样随记，写一篇温暖、克制、真实的简体中文旅行回顾。不得杜撰未提供的地点或经历。包含一个简短的“消费小结”小节；金额和分类统计按原始币种分别提供，只能在同一币种内比较分类及占比，必须注明币种。不得把不同币种相加、跨币种比较最高分类或猜测汇率。控制在700个中文字符以内。"
   },
   daily_summary: {
     maxTokens: 300,
-    system: "你是今日行程摘要助手。仅根据给定的当天计划，按时间先后生成简洁、易扫读的简体中文摘要；不要增加不存在的安排。必要时提醒时间衔接，但不要制造紧张感。控制在260个中文字符以内。"
+    system: "你是今日行程摘要助手。仅根据给定的当天计划生成简洁、易扫读的简体中文摘要，不要增加不存在的安排。各旅程的今天按其自己的时区解释；跨时区交通的起降日期时间按各机场当地时区解释。先说明全天事项和住宿（退房、入住、续住），再按时间先后说明交通与其他计划；换酒店时明确区分退房及入住，不要把续住误作重复入住。必要时提醒时间衔接，但不要制造紧张感。控制在260个中文字符以内。"
   }
 };
 
@@ -38,15 +54,7 @@ function uuid(value: unknown) {
 }
 
 function shanghaiDate() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-}
-
-function dateInZone(iso: string, timeZone: string) {
-  try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
-  } catch {
-    return iso.slice(0, 10);
-  }
+  return dateInZone(new Date().toISOString(), "Asia/Shanghai");
 }
 
 async function principal(request: Request, body: Record<string, unknown>): Promise<Principal> {
@@ -59,11 +67,12 @@ async function principal(request: Request, body: Record<string, unknown>): Promi
 }
 
 function routePrompt(body: Record<string, unknown>) {
-  const origin = stringField(body.origin, 120);
-  const destination = stringField(body.destination, 120);
-  const query = stringField(body.query, 500);
-  const departureTime = typeof body.departureTime === "string" ? body.departureTime.slice(0, 80) : "未指定";
-  return `出发点：${origin}\n到达点：${destination}\n预计出发时间：${departureTime}\n用户确认的查询：${query}`;
+  const origin = stringField(body.origin, 120, false);
+  const destination = stringField(body.destination, 120, false);
+  const query = stringField(body.query, 500, false);
+  if ((origin && !destination) || (!origin && destination) || (!query && !(origin && destination))) throw new ApiError("INVALID_INPUT", "请填写完整的出发地和目的地，或输入一句路线查询。", 400);
+  const departureTime = stringField(body.departureTime, 80, false) || "未指定";
+  return `${origin && destination ? `出发点：${origin}\n到达点：${destination}\n` : "请从用户查询识别起点与终点；不明确时先询问，不要猜测。\n"}预计出发时间：${departureTime}\n用户确认的查询：${query || `从${origin}到${destination}怎么走`}`;
 }
 
 function shortTextPrompt(body: Record<string, unknown>, label: string) {
@@ -77,69 +86,106 @@ async function recapPrompt(userId: string, body: Record<string, unknown>) {
   const regenerate = body.regenerate === true;
   const { data: trip, error: tripError } = await admin().from("trips").select("id,name,destination,start_date,end_date,timezone").eq("id", tripId).eq("user_id", userId).maybeSingle();
   if (tripError || !trip) throw new ApiError("TRIP_NOT_FOUND", "没有找到这段行程", 404);
-  if (!regenerate) {
-    const { data: cached } = await admin().from("trip_recaps").select("content,generated_at").eq("trip_id", tripId).eq("user_id", userId).maybeSingle();
-    if (cached) return { cached: true as const, content: cached.content as string, generatedAt: cached.generated_at as string, tripId };
-  }
-  if (trip.end_date >= shanghaiDate()) {
-    const { data: planStates } = await admin().from("records").select("plan_status").eq("user_id", userId).eq("trip_id", tripId).eq("record_type", "trip").is("parent_plan_id", null);
+  if (trip.end_date >= dateInZone(new Date().toISOString(), trip.timezone)) {
+    const planStates = await readAllPages((cursor) => {
+      let query = admin().from("records").select("id,plan_status").eq("user_id", userId).eq("trip_id", tripId).eq("record_type", "trip").is("parent_plan_id", null).order("id").limit(500);
+      if (cursor) query = query.gt("id", cursor);
+      return query;
+    }).catch(() => { throw new ApiError("DATA_UNAVAILABLE", "暂时无法核对完整行程状态，不会调用 AI。", 503); });
     if (!planStates?.length || planStates.some((plan) => plan.plan_status !== "completed")) throw new ApiError("TRIP_NOT_FINISHED", "行程结束或所有计划标记完成后，才能生成旅行回顾。", 400);
   }
+  if (!regenerate) {
+    const { data: cached, error: cacheError } = await admin().from("trip_recaps").select("content,generated_at").eq("trip_id", tripId).eq("user_id", userId).maybeSingle();
+    if (cacheError) throw new ApiError("CACHE_UNAVAILABLE", "暂时无法读取已保存的回顾，为避免重复生成，请稍后再试。", 503);
+    if (cached) return { cached: true as const, content: cached.content as string, generatedAt: cached.generated_at as string, tripId };
+  }
 
-  const { data: records, error } = await admin().from("records").select("record_type,content,notes,amount,currency,expense_category,location,event_at").eq("user_id", userId).eq("trip_id", tripId).order("event_at", { ascending: true });
-  if (error) throw new ApiError("INTERNAL_ERROR", "暂时无法整理这段行程", 503);
-  const rows = records || [];
-  const totals = new Map<string, number>();
-  const categories = new Map<string, number>();
+  const rows = await readAllPages((cursor) => {
+    let query = admin().from("records").select("id,record_type,content,notes,amount,currency,expense_category,location,event_at").eq("user_id", userId).eq("trip_id", tripId).order("id").limit(500);
+    if (cursor) query = query.gt("id", cursor);
+    return query;
+  }).catch(() => { throw new ApiError("DATA_UNAVAILABLE", "暂时无法读取完整行程，不会调用 AI。", 503); });
+  rows.sort((a, b) => String(a.event_at).localeCompare(String(b.event_at)) || a.id.localeCompare(b.id));
   const places = new Set<string>();
   const notes = rows.filter((row) => row.record_type === "note" && row.content).map((row) => String(row.content).slice(0, 180));
   for (const row of rows) {
     if (row.location) places.add(String(row.location));
-    if (row.record_type === "expense" && row.amount != null && row.currency) {
-      const amount = Number(row.amount) || 0;
-      totals.set(String(row.currency), (totals.get(String(row.currency)) || 0) + amount);
-      categories.set(String(row.expense_category || "other"), (categories.get(String(row.expense_category || "other")) || 0) + amount);
-    }
   }
   const sampledNotes = notes.length <= 20 ? notes : Array.from({ length: 20 }, (_, index) => notes[Math.floor(index * (notes.length - 1) / 19)]);
   const compact = {
     trip: { name: trip.name, destination: trip.destination, startDate: trip.start_date, endDate: trip.end_date },
     recordCount: rows.length,
     placeCount: places.size,
-    expenseTotals: Object.fromEntries(totals),
-    categoryTotals: Object.fromEntries(categories),
+    ...aggregateExpenseCurrencies(rows),
+    currencyComparison: "每个币种单独统计，不跨币种相加或比较，不进行猜测性汇率换算。",
     sampledNotes
   };
-  return { cached: false as const, prompt: JSON.stringify(compact), tripId, snapshotHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(compact))).then((value) => Array.from(new Uint8Array(value)).map((byte) => byte.toString(16).padStart(2, "0")).join("")) };
+  return { cached: false as const, prompt: JSON.stringify(compact), tripId, snapshotHash: await sha256(JSON.stringify(compact)) };
 }
 
 async function dailyPrompt(userId: string, body: Record<string, unknown>) {
+  // The date below is a reporting anchor only, not a cache identity. Quotas
+  // reset separately in Shanghai; business days belong to each trip's timezone.
   const date = shanghaiDate();
   if (body.date != null && body.date !== date) throw new ApiError("INVALID_INPUT", "只能生成今天的计划摘要", 400);
-  const { data: cached } = await admin().from("daily_summaries").select("content,generated_at").eq("user_id", userId).eq("summary_date", date).maybeSingle();
-  if (cached) return { cached: true as const, content: cached.content as string, generatedAt: cached.generated_at as string, date };
-  const { data: trips } = await admin().from("trips").select("id,name,destination,timezone").eq("user_id", userId).is("archived_at", null).lte("start_date", date).gte("end_date", date);
-  if (!trips?.length) return { skipped: true as const, date };
-  const tripIds = trips.map((trip) => trip.id);
-  const { data: records } = await admin().from("records").select("trip_id,content,event_at,plan_status,transport_type,transport_details").eq("user_id", userId).in("trip_id", tripIds).eq("record_type", "trip").neq("plan_status", "cancelled").order("event_at", { ascending: true });
-  const timezoneByTrip = new Map(trips.map((trip) => [trip.id, trip.timezone]));
-  const todayRecords = (records || []).filter((record) => {
-    const details = record.transport_details as Record<string, unknown> | null;
-    const departure = details?.departure as Record<string, unknown> | undefined;
-    const plannedDate = (record.transport_type === "flight" || record.transport_type === "rail") && typeof departure?.date === "string"
-      ? departure.date
-      : dateInZone(record.event_at, timezoneByTrip.get(record.trip_id) || "Asia/Shanghai");
-    return plannedDate === date;
-  }).slice(0, 40);
-  if (!todayRecords.length) return { skipped: true as const, date };
-  const compact = todayRecords.map((record) => ({ time: record.event_at, title: record.content, status: record.plan_status, type: record.transport_type }));
-  return { cached: false as const, date, prompt: JSON.stringify({ date, trips: trips.map(({ name, destination }) => ({ name, destination })), plans: compact }) };
+  const tripRows = await readAllPages((cursor) => {
+    let query = admin().from("trips").select("id,name,destination,timezone,start_date,end_date").eq("user_id", userId).is("archived_at", null).order("id").limit(500);
+    if (cursor) query = query.gt("id", cursor);
+    return query;
+  }).catch(() => { throw new ApiError("DATA_UNAVAILABLE", "暂时无法读取完整旅程，不会调用 AI。", 503); });
+  const trips = activeSummaryTrips((tripRows || []) as SummaryTrip[]);
+  if (!trips.length) return { skipped: true as const, date };
+  const contextKey = await sha256(dailySummaryContext(trips));
+  const { data: cached, error: cacheError } = await admin().from("daily_summaries").select("content,generated_at").eq("user_id", userId).eq("context_key", contextKey).maybeSingle();
+  if (cacheError) throw new ApiError("CACHE_UNAVAILABLE", "暂时无法读取已保存的摘要，为避免重复生成，请稍后再试。", 503);
+  if (cached) return { cached: true as const, content: cached.content as string, generatedAt: cached.generated_at as string, date, contextKey };
+  // Avoid an oversized PostgREST IN URL when a long-lived account has many trips.
+  const records = await readAllPages((cursor) => {
+    let query = admin().from("records").select("id,trip_id,content,event_at,plan_status,transport_type,transport_details,schedule_details").eq("user_id", userId).eq("record_type", "trip").is("parent_plan_id", null).neq("plan_status", "cancelled").order("id").limit(500);
+    if (cursor) query = query.gt("id", cursor);
+    return query;
+  }).catch(() => { throw new ApiError("DATA_UNAVAILABLE", "暂时无法读取完整计划，不会调用 AI。", 503); });
+  const tripIds = new Set(trips.map((trip) => trip.id));
+  const plans = projectDailyPlans(records.filter((row) => tripIds.has(row.trip_id)) as SummaryRecord[], trips);
+  if (!plans.length) return { skipped: true as const, date, contextKey };
+  return { cached: false as const, date, contextKey, prompt: JSON.stringify({ trips: trips.map(({ id, name, destination, day, timezone }) => ({ id, name, destination, date: day, timezone })), plans }) };
+}
+
+async function persistResult(payload: RecoveryPayload) {
+  const { data, error } = await admin().rpc("store_ai_result", {
+    p_user_id: payload.userId, p_request_id: payload.requestId, p_feature: payload.action,
+    p_content: payload.content, p_generated_at: payload.generatedAt,
+    p_trip_id: payload.tripId || null, p_summary_date: payload.date || null,
+    p_context_key: payload.contextKey || null, p_snapshot_hash: payload.snapshotHash || null,
+    p_response_meta: payload.usage ? { usage: payload.usage } : null
+  });
+  if (error || !data?.saved) throw new ApiError("RESULT_SAVE_FAILED", "结果已生成，但暂未保存到云端。请重试保存，不必重新生成或再次消耗额度。", 503);
+  return data as { saved: boolean; generatedAt: string; newerPreserved?: boolean };
+}
+
+async function finishFailure(requestId: string, status: "upstream_error" | "failed", meta?: Record<string, unknown>) {
+  try { await completeUsage(requestId, status, meta); }
+  catch { console.error("Failed request usage remains reserved", { requestId, status }); }
+}
+
+async function retryPersistence(request: Request, body: Record<string, unknown>) {
+  const user = await authenticatedUser(request);
+  const token = stringField(body.recoveryToken, 64_000);
+  let payload: RecoveryPayload;
+  try { payload = await verifyRecoveryToken<RecoveryPayload>(token, RECOVERY_SCOPE, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""); }
+  catch { throw new ApiError("RECOVERY_EXPIRED", "保存凭据已失效；已生成的内容仍保留在本机，请先复制保存，不要反复重新生成。", 400); }
+  if (payload.userId !== user.id || !ACTIONS.has(payload.action)) throw new ApiError("RECOVERY_FORBIDDEN", "这份待保存结果不属于当前账号。", 403);
+  const saved = await persistResult(payload);
+  return { action: payload.action, persisted: true, recoverySaved: true, generatedAt: saved.generatedAt, newerPreserved: saved.newerPreserved === true,
+    result: payload.action === "expense_parse" ? JSON.parse(payload.content) : payload.content };
 }
 
 function normalizeExpense(content: string) {
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(content) as Record<string, unknown>;
+    const value: unknown = JSON.parse(content);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Not an object");
+    parsed = value as Record<string, unknown>;
   } catch {
     throw new ApiError("AI_INVALID_OUTPUT", "AI 识别结果格式不正确，请手动填写。", 502);
   }
@@ -158,22 +204,28 @@ export default {
     const origin = requestOrigin(request);
     const early = preflight(request, edgeRequestId);
     if (early) return early;
-    let quotaRequestId = edgeRequestId;
+    let quotaRequestId: string = edgeRequestId;
     let usageReserved = false;
     let usageFinished = false;
     try {
-      const body = await readJson(request, 16_000);
+      const body = await readJson(request, 70_000);
+      // This path deliberately precedes quota reservation and upstream setup.
+      if (body.action === "retry_save") return json(origin, edgeRequestId, { data: await retryPersistence(request, body) });
       const action = typeof body.action === "string" ? body.action as Action : "" as Action;
       if (!ACTIONS.has(action)) throw new ApiError("INVALID_ACTION", "不支持这项 AI 功能", 400);
       quotaRequestId = uuid(body.requestId);
       const who = await principal(request, body);
+      if (body.expectedOwner != null) {
+        const expectedOwner = stringField(body.expectedOwner, 80);
+        if (who.tier !== "user" || expectedOwner !== who.userId) throw new ApiError("ACCOUNT_CHANGED", "账号已切换，这次 AI 请求已停止。请在当前账号中重新操作。", 409);
+      }
 
       if (who.tier === "demo" && action === "trip_recap") {
         return json(origin, edgeRequestId, { data: { action, cached: true, result: "这次示例旅程从东京清晨的电车开始，也在一顿热腾腾的拉面里留下了最鲜明的记忆。几段移动、几次临时起意的小停留，让原本紧凑的日程有了呼吸。\n\n消费小结\n示例数据显示餐饮占比最高，主要来自当地料理与咖啡；交通支出保持稳定。正式账号会根据你自己的记录生成真实回顾。" } });
       }
       if (who.tier === "demo" && action === "daily_summary") throw new ApiError("DEMO_UNAVAILABLE", "每日摘要暂不在演示模式开放。", 400);
 
-      let prepared: { prompt?: string; cached?: boolean; skipped?: boolean; content?: string; generatedAt?: string; tripId?: string; snapshotHash?: string; date?: string };
+      let prepared: Prepared;
       if (action === "route") prepared = { prompt: routePrompt(body) };
       else if (action === "expense_parse") prepared = { prompt: shortTextPrompt(body, "待识别记账描述") };
       else if (action === "note_polish") prepared = { prompt: shortTextPrompt(body, "待润色原文") };
@@ -185,7 +237,7 @@ export default {
         prepared = await dailyPrompt(who.userId, body);
       }
 
-      if (prepared.cached) return json(origin, edgeRequestId, { data: { action, cached: true, result: prepared.content, generatedAt: prepared.generatedAt } });
+      if (prepared.cached) return json(origin, edgeRequestId, { data: { action, cached: true, persisted: true, result: prepared.content, generatedAt: prepared.generatedAt, contextKey: prepared.contextKey } });
       if (prepared.skipped) return json(origin, edgeRequestId, { data: { action, skipped: true, result: null } });
       if (!prepared.prompt) throw new ApiError("INVALID_INPUT", "缺少生成内容", 400);
 
@@ -195,13 +247,8 @@ export default {
       usageReserved = true;
 
       const config = ACTION_CONFIG[action];
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      let response: Response;
-      try {
-        response = await fetch("https://api.deepseek.com/chat/completions", {
+      const { response, payload } = await fetchJsonWithTimeout<{ choices?: Array<{ message?: { content?: unknown } }>; usage?: Record<string, unknown> }>("https://api.deepseek.com/chat/completions", {
           method: "POST",
-          signal: controller.signal,
           headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "deepseek-v4-flash",
@@ -212,19 +259,15 @@ export default {
             ...(config.json ? { response_format: { type: "json_object" } } : {}),
             messages: [{ role: "system", content: config.system }, { role: "user", content: prepared.prompt }]
           })
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-      const payload = await response.json().catch(() => ({})) as { choices?: Array<{ message?: { content?: unknown } }>; usage?: Record<string, unknown> };
+        }, REQUEST_TIMEOUT_MS);
       if (!response.ok) {
-        await completeUsage(quotaRequestId, "upstream_error", { upstreamStatus: response.status });
+        await finishFailure(quotaRequestId, "upstream_error", { upstreamStatus: response.status });
         usageFinished = true;
         throw new ApiError("AI_UNAVAILABLE", "AI 功能暂时不可用，可以继续手动填写。", 503);
       }
       const raw = payload.choices?.[0]?.message?.content;
       if (typeof raw !== "string" || !raw.trim()) {
-        await completeUsage(quotaRequestId, "upstream_error");
+        await finishFailure(quotaRequestId, "upstream_error");
         usageFinished = true;
         throw new ApiError("AI_UNAVAILABLE", "AI 没有返回可用内容，请手动填写。", 503);
       }
@@ -233,21 +276,38 @@ export default {
       if (action === "expense_parse") result = normalizeExpense(raw.trim());
       if (action === "note_polish") result = Array.from(raw.trim()).slice(0, 260).join("");
       if (action === "route") result = Array.from(raw.trim()).slice(0, 320).join("");
-      if (action === "trip_recap" && who.userId && prepared.tripId) {
-        await admin().from("trip_recaps").upsert({ user_id: who.userId, trip_id: prepared.tripId, content: raw.trim(), source_snapshot_hash: prepared.snapshotHash, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "user_id,trip_id" });
+      const generatedAt = new Date().toISOString();
+      let persisted = false;
+      let recoveryToken: string | undefined;
+      if (who.userId) {
+        const recovery: RecoveryPayload = { userId: who.userId, requestId: quotaRequestId, action,
+          content: typeof result === "string" ? result : JSON.stringify(result), generatedAt,
+          ...(prepared.tripId ? { tripId: prepared.tripId, snapshotHash: prepared.snapshotHash } : {}),
+          ...(prepared.date ? { date: prepared.date, contextKey: prepared.contextKey } : {}),
+          ...(payload.usage ? { usage: payload.usage } : {}) };
+        try { await persistResult(recovery); persisted = true; usageFinished = true; }
+        catch {
+          console.error("Generated AI result could not be persisted", { requestId: quotaRequestId, action });
+          try { recoveryToken = await signRecoveryToken(recovery, RECOVERY_SCOPE, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""); }
+          catch { console.error("AI recovery token could not be created", { requestId: quotaRequestId }); }
+          // Do not convert a successful generation into 'failed', refund it or
+          // trigger another upstream call. The signed retry completes this row.
+          usageFinished = true;
+        }
+      } else {
+        try { await completeUsage(quotaRequestId, "completed", payload.usage ? { usage: payload.usage } : undefined); persisted = true; }
+        catch { console.error("Demo AI result usage remains reserved", { requestId: quotaRequestId }); }
+        usageFinished = true;
       }
-      if (action === "daily_summary" && who.userId && prepared.date) {
-        await admin().from("daily_summaries").upsert({ user_id: who.userId, summary_date: prepared.date, content: raw.trim(), generated_at: new Date().toISOString() }, { onConflict: "user_id,summary_date" });
-      }
-      await completeUsage(quotaRequestId, "completed", payload.usage ? { usage: payload.usage } : undefined);
-      usageFinished = true;
-      return json(origin, edgeRequestId, { data: { action, cached: false, result } });
+      return json(origin, edgeRequestId, { data: { action, cached: false, result, generatedAt, persisted,
+        ...(prepared.contextKey ? { contextKey: prepared.contextKey } : {}),
+        ...(!persisted ? { warning: recoveryToken ? "内容已生成，云端保存暂未完成；请重试保存，不必重新生成或再次消耗额度。" : "内容已生成，但暂未完成云端同步。请先复制保存这份内容，不要反复重新生成。", usageLogPending: true, ...(recoveryToken ? { recoveryToken } : {}) } : {}) } });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        if (usageReserved && !usageFinished) await completeUsage(quotaRequestId, "upstream_error");
+        if (usageReserved && !usageFinished) await finishFailure(quotaRequestId, "upstream_error");
         return errorResponse(origin, edgeRequestId, new ApiError("AI_TIMEOUT", "AI 响应超时，可以稍后重试或手动填写。", 504));
       }
-      if (usageReserved && !usageFinished) await completeUsage(quotaRequestId, "failed");
+      if (usageReserved && !usageFinished) await finishFailure(quotaRequestId, "failed");
       return errorResponse(origin, edgeRequestId, error);
     }
   }

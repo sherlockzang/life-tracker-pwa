@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { admin, ApiError, authenticatedUser, errorResponse, json, preflight, readJson, requestOrigin, stringField } from "../_shared/api.ts";
+import { readAllPages } from "../_shared/pagination.ts";
 
 type ManagedTier = "standard" | "friend" | "owner";
 
@@ -25,11 +26,20 @@ function monthStart() {
 }
 
 async function listUsers(query: string) {
-  const { data: authData, error: authError } = await admin().auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (authError) throw new ApiError("INTERNAL_ERROR", "暂时无法读取账号列表", 503);
+  const users: { id: string; email?: string; created_at: string; last_sign_in_at?: string }[] = [];
+  const seen = new Set<string>();
+  for (let page = 1; ; page++) {
+    if (page > 10_000) throw new ApiError("INTERNAL_ERROR", "账号列表过大，请稍后重试", 503);
+    const { data, error } = await admin().auth.admin.listUsers({ page, perPage: 1000 });
+    if (error || !Array.isArray(data?.users)) throw new ApiError("INTERNAL_ERROR", "暂时无法完整读取账号列表", 503);
+    if (!data.users.length) break;
+    const fresh = data.users.filter(user => !seen.has(user.id));
+    if (!fresh.length) throw new ApiError("INTERNAL_ERROR", "账号分页未前进，请重试", 503);
+    for (const user of fresh) { seen.add(user.id); users.push(user); }
+  }
 
   const normalized = query.trim().toLowerCase();
-  const matched = authData.users
+  const matched = users
     .filter((candidate) => !normalized || candidate.email?.toLowerCase().includes(normalized))
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
     .slice(0, 50);
@@ -37,11 +47,19 @@ async function listUsers(query: string) {
 
   if (!ids.length) return [];
 
-  const [{ data: entitlements, error: entitlementError }, { data: usage, error: usageError }] = await Promise.all([
-    admin().from("api_entitlements").select("user_id, tier, source, granted_at, updated_at").in("user_id", ids).is("revoked_at", null),
-    admin().from("api_usage_events").select("user_id, service, feature").in("user_id", ids).eq("counted", true).gte("created_at", monthStart())
+  const until = new Date().toISOString();
+  const [entitlements, usage] = await Promise.all([
+    readAllPages(cursor => {
+      let query = admin().from("api_entitlements").select("id:user_id, user_id, tier, source, granted_at, updated_at").in("user_id", ids).is("revoked_at", null).order("user_id").limit(500);
+      if (cursor) query = query.gt("user_id", cursor);
+      return query;
+    }),
+    readAllPages(cursor => {
+      let query = admin().from("api_usage_events").select("id, user_id, service, feature").in("user_id", ids).eq("counted", true).gte("created_at", monthStart()).lt("created_at", until).order("id").limit(500);
+      if (cursor) query = query.gt("id", cursor);
+      return query;
+    })
   ]);
-  if (entitlementError || usageError) throw new ApiError("INTERNAL_ERROR", "暂时无法读取账号权限与用量", 503);
 
   const entitlementByUser = new Map((entitlements || []).map((item) => [item.user_id, item]));
   const usageByUser = new Map<string, { aviation: number; deepseek: number }>();

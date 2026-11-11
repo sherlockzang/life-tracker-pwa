@@ -1,114 +1,128 @@
 # Life Tracker PWA
 
-一个适合长期使用的个人记录工具：在同一条时间线里快速记录消费、行程和随手记，并通过 Supabase 在不同设备间同步。
+长期使用的个人生活记录工具：消费、行程、随记汇成时间线；旅行计划与实际记录关联；支持多币种统计、邮箱验证码登录、离线记录和受权限保护的 AI 服务。
 
-线上地址：<https://sherlockzang.github.io/life-tracker-pwa/>
+维护者：Sherlock Zang。网站：[Life Tracker](https://sherlockzang.github.io/life-tracker-pwa/)，仓库：[sherlockzang/life-tracker-pwa](https://github.com/sherlockzang/life-tracker-pwa)。
 
-## 已实现
+## 版本与交付边界
 
-- Supabase Magic Link 邮箱登录，首次使用自动注册
-- 多用户数据隔离，所有用户数据表均启用 RLS
-- 昵称、首字母头像与 2MB 内自定义头像上传
-- 新用户首次引导，以及按账号记录已读状态的版本更新提示
-- 设置页提供永久更新记录，可回看 1.0.0 起的所有版本说明
-- 网站品牌、Safari 桌面图标、PWA 图标和分享预览统一使用正式正方形 Logo
-- 消费 / 行程 / 随记统一快速输入和时间线筛选
-- 13 种币种、自动汇率缓存、分类占比和每日趋势图
-- 多行程管理、按日期动态生成 Day、按时间排序、跨天移动与行程二次编辑
-- 飞机、高铁和地铁结构化交通模板，以及交通计划智能摘要
-- 离线机场补全、计划/实际航班分离，以及到达后 Aviationstack 实际信息匹配
-- 新行程目的地时区自动匹配，以及标准 IANA 时区选择
-- DeepSeek 路线查询、记账解析、随记润色、旅行回顾与今日摘要，全部采用预览确认或服务端缓存
-- Standard / Friend / Owner 权限、固定邀请码、服务端原子配额、共享额度池与频率保护
-- 无需邮箱的本地演示模式；航班使用模拟数据，DeepSeek 按设备限制每日体验次数
-- 计划状态打卡，以及“计划 → 实际消费/随记”的父子结构
-- 以 iPhone 17 Pro 为主的灵动岛安全区域与 PWA 适配
-- 设置页提供长期保留的致谢栏目
-- 深色优先、浅色和跟随系统模式
-- PWA 安装、静态资源离线缓存、IndexedDB 数据快照和离线写入队列
-- GitHub Actions 自动部署到 GitHub Pages
+文档初稿：2026-10-01；追加修复与最终参考快照：2026-10-02。代码位于 `v2.0.0-ui` 工作分支，版本文件为 **2.0.0**；稳定回退基线是 **V1.4.1** 的 `stable-before-v2.0.0`。V2 包含尚未发布的修改，不能仅凭版本文件认定线上已经更新。
+
+本次修复与文档交付不推送、部署、运行生产迁移或调用真实 AI / 稀缺航班接口。[首轮审查](docs/CODE-REVIEW-2026-10-01.md)保留原始缺陷证据；修复状态与验证限制以[最新验收](docs/ACCEPTANCE-2026-10-01.md)为准。
+
+## 文档导航
+
+| 文档 | 用途 |
+| --- | --- |
+| [架构说明](docs/ARCHITECTURE.md) | 组件边界、数据流、离线、认证、权限与安全 |
+| [从零重建规范](docs/REBUILD-SPEC.md) | 原仓库丢失时按功能合同和验收用例重做网站 |
+| [数据库说明](docs/DATABASE.md) | 表关系、JSON、RLS、RPC、迁移和角色初始化 |
+| [API 合同](docs/API-CONTRACT.md) | 全部 Edge Functions 的请求、响应、鉴权和错误 |
+| [部署、备份与回滚](docs/DEPLOYMENT-ROLLBACK.md) | 本地开发、SMTP、密钥、Pages、升级、恢复和回滚 |
+| [完整用户指南](docs/USER-GUIDE.md) | 安装、登录、记录、行程、酒店、航班、AI 和设置 |
+| [V2 UI 验收记录](docs/V2.0.0-UI-REVIEW.md) | 本轮界面调整及验证范围 |
+| [修复验收记录](docs/ACCEPTANCE-2026-10-01.md) | R01–R10修复映射、测试与未完成的发布门禁 |
+| [独立审查交接单](docs/INDEPENDENT-REVIEW-HANDOFF.md) | 下一个模型的审查重点及执行约束 |
+| [独立审计原报告](docs/INDEPENDENT-AUDIT-2026-10-02.md) | 修复前候选包的F01–F07原始证据 |
+| [审计问题修复与复验](docs/AUDIT-FIXES-2026-10-02.md) | 本轮七项处置、新增测试及仍需真实环境验证的边界 |
+| [自审问题修复与复验](docs/SELF-AUDIT-FIXES-2026-10-02.md) | 后续SA-01–SA-05、三组新增回归、IndexedDB升级及复审边界 |
+| [依赖安全审计](docs/DEPENDENCY-AUDIT-2026-10-01.md) | 9个受影响开发/构建包已兼容修复，最新完整/生产审计均0命中 |
+| [独立参考：数据库](docs/reference/SCHEMA-REFERENCE.md) | 按执行顺序保存的完整 SQL，不只是源码路径 |
+| [独立参考：服务端](docs/reference/EDGE-REFERENCE.md) | 后端实现与邮件模板 |
+| [独立参考：领域与配置](docs/reference/DOMAIN-REFERENCE.md) | 类型、数据字典、关键算法、离线和构建配置 |
+| [独立参考：完整界面](docs/reference/FRONTEND-REFERENCE.md) | 全部前端界面源码和样式 |
+| [独立参考：正式图标](docs/reference/ASSET-REFERENCE.md) | PNG二进制的Base64及校验值，可恢复原图 |
+
+未来维护者先读最新验收、重建规范和首轮审查，再读架构、数据库与 API。参考快照是修复后候选工作树；本地真SQL已通过，但实际Supabase集成与真机验证不可因有快照就省略。
+
+## 核心功能
+
+- 邮箱 **6 位验证码**登录，不跳到 Safari；恢复前台主动读取当前窗口会话。
+- 消费 / 行程 / 随记快速输入、主页倒序时间线、类型筛选与消费图表。
+- 13 种币种、Frankfurter 汇率快照；缺失汇率有提示，不把不同币种直接相加。
+- 多旅程、目的地时区识别、动态 Day、按时间安排计划、编辑与可撤销完成状态、计划关联实际消费/随记。
+- 飞机 / 铁路 / 市内交通模板；起降机场及各自 IANA 时区、航司双向补全、机型规范化、跨时区飞行时长；夏令时重复时间必须明确选择第一次/第二次及UTC偏移。
+- 已结束航班主动匹配 Aviationstack；精确核对航班号、出发日期和航线，预览确认后保存，不在开页时反复查询。
+- V2：跨日期入境航班不会因旅程晚一天开始而丢失；已完成交通保留可读标题，匹配信息优先展示；全天安排、多晚酒店、入住/续住/退房及换酒店提醒。
+- DeepSeek 路线建议、消费解析、随记润色、旅行回顾、今日摘要；AI 不自动替用户保存记录。
+- Standard / Friend / Owner、邀请码、Owner 权限后台、服务端额度池与使用日志。
+- 本地演示与真实账号隔离；航班模拟；演示轻量 AI 每设备每日 2 次。
+- 深/浅/系统主题、昵称/头像、首次引导、永久更新记录、隐私说明与致谢。
+- Pages 静态部署、PWA 安装与资源缓存、IndexedDB 快照和离线写入队列。
+
+尚未实现：Passkey 登录、邮箱日程提醒、任意记录的通用编辑/删除界面、完整数据导出、通用记录图片上传、管理员查看他人记录。`record-images` 是预留设施，不代表已有图片记录功能。
 
 ## 本地运行
 
-需要 Node.js 22 或更高版本。
+需要 Node.js **22.13.0 或更高**；优先用 Node 22 和仓库锁文件。
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-打开 <http://localhost:3000/life-tracker-pwa/>。
+打开 [本地预览](http://localhost:3000/life-tracker-pwa/)。原代码保留生产 Supabase 的公开连接默认值；**本地预览不等于后端沙箱**。开发先创建测试项目，在 `.env.local` 中填写测试连接：
 
-生产构建：
+```dotenv
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLIC_PUBLISHABLE_KEY
+```
+
+`VITE_` 配置会进入静态前端，只允许公开配置。绝不能放 service-role、数据库密码、Resend / Aviationstack / DeepSeek 密钥。
+
+## 检查命令
 
 ```bash
+npm run lint
 npm run build
-npm run preview
+node scripts/test-airlines.mjs
+node scripts/test-flight-duration.mjs
+node scripts/test-flight-trip-placement.mjs
+node scripts/test-schedules-and-flight-display.mjs
+node scripts/test-calendar-and-sync.mjs
+node scripts/test-flight-integrity.mjs
+node scripts/test-ai-reliability.mjs
+node scripts/test-audit-regressions.mjs
+node scripts/test-self-audit-sync.mjs
+node scripts/test-self-audit-calendar.mjs
+node scripts/test-self-audit-ai.mjs
+node scripts/verify-ui-contract.mjs
+node scripts/verify-documentation.mjs
+git diff --check
 ```
 
-## Supabase 配置
+`verify-ui-contract`依赖Git中的`stable-before-v2.0.0`，用于本轮UI/可靠性合同；没有Git历史的重建包须注明不适用并手工复核，不伪造通过。真实SQL独立执行`node scripts/test-database-integrity.mjs`；已在受审查允许的沙箱外临时PG18通过。7个Edge入口另用Deno2.5.3实际类型检查通过；前端构建本身不检查Edge，也不替代Supabase完整平台/真机集成，详见部署文档。
 
-项目默认连接到本项目的 Supabase 实例。若需要更换项目，复制 `.env.example` 为 `.env.local`：
+## 技术栈与目录
 
-```bash
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
-```
-
-Publishable Key 会随静态前端发布，这是 Supabase 的预期用法；真正的数据安全由 RLS 保证。不要把 `service_role` key 放进前端或 GitHub 仓库。
-
-数据库初始化步骤见 [`supabase/README.md`](supabase/README.md)。迁移文件按文件名顺序执行：
+React 19 + TypeScript + Vite 8；Supabase Auth / PostgreSQL / Storage / Edge Functions；idb / IndexedDB；dnd-kit；Recharts；Lucide；vite-plugin-pwa / Workbox。准确依赖以锁文件为准；重建参考保存包版本快照。
 
 ```text
-supabase/migrations/20260714000000_initial_schema.sql
-supabase/migrations/20260714010000_profiles_changelogs.sql
-supabase/migrations/20260714020000_release_1_1_1.sql
-supabase/migrations/20260714030000_release_1_1_2.sql
-supabase/migrations/20260714040000_release_1_2_0_transport.sql
-supabase/migrations/20260714050000_release_1_2_1_flight_lookup.sql
-supabase/migrations/20260714060000_release_1_3_0_security_and_ai.sql
-supabase/migrations/20260714061000_release_1_3_0_demo_device_session.sql
+src/App.tsx                 会话、页面状态、加载、保存确认/副本、演示与同步
+src/components/             登录、时间线、规划、交通编辑、全天安排、设置、统计
+src/lib/                    数据、离线、AI、字典、时间与显示派生逻辑
+src/types.ts                跨组件领域类型
+src/styles/tokens.css       统一深浅主题变量
+src/styles.css              响应式布局与组件样式
+supabase/migrations/        17 个有序 SQL 迁移（最后7个待发布）
+supabase/functions/         7 个端点和共享安全模块
+supabase/templates/         注册确认、已有用户登录的 OTP 邮件模板
+public/                     正式 Logo 与安装图标
+scripts/                    纯逻辑回归、UI 边界与文档检查
+docs/                       设计、运行、使用、恢复和审查资料
+.github/workflows/deploy.yml main 推送或手动触发的 Pages 发布
 ```
 
-### 数据表
+## 交付与灾备原则
 
-- `user_settings`：主币种、主题偏好
-- `trips`：行程名称、目的地、日期和时区
-- `records`：消费、行程、随记统一记录；通过 `parent_plan_id` 关联实际执行记录，并通过 `transport_type` 与 `transport_details` 保存结构化交通计划
-- `exchange_rates`：API 或手动汇率快照
-- `profiles`：昵称、头像、首次引导和版本已读状态
-- `changelogs`：面向用户展示的版本更新说明
-- `api_entitlements`、`api_quota_buckets`、`api_usage_events`：服务端账号权限与原子配额审计
-- `invite_codes`、`invite_redemptions`：仅保存散列的邀请码与兑换关系
-- `demo_sessions`：按设备延续的短期演示会话
-- `trip_recaps`、`daily_summaries`：已生成的旅行回顾和每日摘要缓存
+2026-10-02独立审计指出的F01–F07已修复并新增回归：[修复与复验记录](docs/AUDIT-FIXES-2026-10-02.md)。完整集合使用唯一ID游标分批读取；离线父子实体先满足依赖再保存；关系反向更新、异常内层形状、配额读取及上海月末元数据补强。额度政策未变，尚未部署；真实Supabase/iPhone及回滚门禁仍需完成。
 
-`day_number` 不存入数据库，而是根据行程时区、`trips.start_date` 和 `records.event_at` 动态计算。
+后续自审发现的五项问题也已修复：[自审修复记录](docs/SELF-AUDIT-FIXES-2026-10-02.md)。已发送请求UUID保留、成功修正后的旧失败副本归档且可导出、主页编辑使用行程时区日期、非航班时间严格校验、自动摘要失败不再定时重试。当前仍是本地候选，不代表已上线。
 
-## Magic Link 重定向
+本套reference保存完整源码、配置、锁文件、测试及图标，可恢复候选工作树的应用部分；准确文件数由`verify-documentation`输出。不含Git历史、云端历史数据、用户身份数据或秘密。用`node scripts/build-documentation-reference.mjs --write`机械刷新快照后须重新校验和恢复演练。图标原件可从ASSET参考恢复，但用户头像/照片仍需Storage备份。文档包、源码镜像、数据库与Storage备份应分别存到仓库之外；浏览器缓存和GitHub单一副本都不是备份。
 
-在 Supabase Dashboard 的 Authentication → URL Configuration 中配置：
+未来 AI 不得自动修改生产、绕过 RLS、凭邮箱或邀请码认定 Owner，或把已发现缺陷复制为需求。发布须经维护者确认，并通过审查报告中的门禁。
 
-- Site URL：`https://sherlockzang.github.io/life-tracker-pwa/`
-- Redirect URL：`https://sherlockzang.github.io/life-tracker-pwa/`
-- 本地 Redirect URL：`http://localhost:3000/life-tracker-pwa/`
+## 致谢
 
-## 部署
-
-推送到 `main` 分支后，`.github/workflows/deploy.yml` 会自动构建并发布 GitHub Pages。
-
-如需手动重新部署，可在 GitHub 仓库的 Actions 页面运行 **Deploy to GitHub Pages** 工作流。
-
-## 项目结构
-
-```text
-src/components/       界面组件
-src/lib/              Supabase、离线缓存与数据访问
-src/types.ts          共享类型和字段元数据
-supabase/migrations/  数据库迁移与 RLS
-public/                PWA 图标和分享预览图
-```
-
-每次发布新需求前先确认版本号，再将普通用户可读的更新摘要写入 `changelogs` 并部署。
-
-汇率使用无密钥的 Frankfurter API；如果网络不可用，统计会继续使用 IndexedDB 和 Supabase 中最近一次缓存的汇率。
+Built with the help of Codex, with special thanks to Claude for prompt design and development support.

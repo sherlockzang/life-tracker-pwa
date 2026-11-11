@@ -1,5 +1,7 @@
 import type { FlightDetails, LifeRecord, MetroDetails, RailDetails, RailSystemType, TransportDetails, TransportType } from "../types";
 import { normalizeAircraftType } from "./aircraftTypes";
+import { flightDisplay } from "./flightDisplay";
+import { schedulePresentation } from "./schedules";
 
 export const RAIL_SYSTEM_LABELS: Record<RailSystemType, string> = {
   china_hsr: "中国高铁",
@@ -11,6 +13,7 @@ export const RAIL_SYSTEM_LABELS: Record<RailSystemType, string> = {
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const stringValue = (value: unknown) => typeof value === "string" ? value : "";
+const utcOffset = (value: unknown) => typeof value === "number" && Number.isInteger(value) && Math.abs(value) <= 840 ? value : undefined;
 
 export function isTransportType(value: unknown): value is TransportType {
   return value === "flight" || value === "rail" || value === "metro";
@@ -24,8 +27,8 @@ export function normalizeTransportDetails(type: TransportType, value: unknown): 
     return {
       airline: stringValue(value.airline),
       flight_number: stringValue(value.flight_number),
-      departure: { date: stringValue(departure.date), time: stringValue(departure.time), airport: stringValue(departure.airport), iata: stringValue(departure.iata) || undefined, terminal: stringValue(departure.terminal), timezone: stringValue(departure.timezone) || undefined },
-      arrival: { date: stringValue(arrival.date), time: stringValue(arrival.time), airport: stringValue(arrival.airport), iata: stringValue(arrival.iata) || undefined, terminal: stringValue(arrival.terminal), timezone: stringValue(arrival.timezone) || undefined },
+      departure: { date: stringValue(departure.date), time: stringValue(departure.time), airport: stringValue(departure.airport), iata: stringValue(departure.iata) || undefined, terminal: stringValue(departure.terminal), timezone: stringValue(departure.timezone) || undefined, utc_offset_minutes: utcOffset(departure.utc_offset_minutes) },
+      arrival: { date: stringValue(arrival.date), time: stringValue(arrival.time), airport: stringValue(arrival.airport), iata: stringValue(arrival.iata) || undefined, terminal: stringValue(arrival.terminal), timezone: stringValue(arrival.timezone) || undefined, utc_offset_minutes: utcOffset(arrival.utc_offset_minutes) },
       gate: stringValue(value.gate) || undefined,
       registration: stringValue(value.registration) || undefined,
       seat: stringValue(value.seat) || undefined,
@@ -82,11 +85,13 @@ export function transportTitle(type: TransportType, details: TransportDetails) {
 }
 
 export function getTransportPresentation(record: LifeRecord) {
+  const schedule = schedulePresentation(record);
+  if (schedule) return schedule;
   if (!record.transport_type || !record.transport_details) {
     return { title: record.content, subtitle: record.notes || "", label: "通用事项" };
   }
   if (record.transport_type === "flight") {
-    const details = record.transport_details as FlightDetails;
+    const details = flightDisplay(record)!.details;
     return {
       title: transportTitle("flight", details),
       subtitle: [details.airline, details.gate ? `登机口 ${details.gate}` : "", details.seat ? `座位 ${details.seat}` : ""].filter(Boolean).join(" · "),

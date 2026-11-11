@@ -96,7 +96,11 @@ export async function reserveQuota(args: { userId?: string; demoSessionId?: stri
 }
 
 export async function completeUsage(requestId: string, status: "completed" | "upstream_error" | "not_found" | "failed", responseMeta?: Record<string, unknown>) {
-  await admin().rpc("complete_api_usage", { p_request_id: requestId, p_status: status, p_response_meta: responseMeta || null });
+  const { error } = await admin().rpc("complete_api_usage", { p_request_id: requestId, p_status: status, p_response_meta: responseMeta || null });
+  if (error) {
+    console.error("Usage completion could not be persisted", { requestId });
+    throw new ApiError("USAGE_LOG_FAILED", "结果已生成，但服务使用记录暂未同步；请重试保存，不必重新生成。", 503);
+  }
 }
 
 function quotaError(result: { code?: string; reset_at?: string; retry_at?: string }) {
@@ -135,4 +139,3 @@ export function stringField(value: unknown, maxLength: number, required = true) 
   if ((required && !result) || result.length > maxLength) throw new ApiError("INVALID_INPUT", "提交内容不完整或过长", 400);
   return result;
 }
-
