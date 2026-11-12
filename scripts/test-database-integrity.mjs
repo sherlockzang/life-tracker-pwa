@@ -100,6 +100,9 @@ try {
     catch (error) { throw new Error(`Migration ${name} failed: ${error.message}`, { cause: error }); }
   }
   assert.equal(identityConfigurations,2);
+  for (const role of ["anon", "authenticated"]) {
+    assert.equal(await scalar(admin, "select has_function_privilege($1, 'public.handle_new_user_profile()', 'execute') as value", [role]), false, `${role} cannot invoke the profile trigger function`);
+  }
   const repairedBucket=await scalar(admin,"select to_jsonb(b) as value from public.api_quota_buckets b where bucket_key='aviation:global:2026-02'");
   assert.equal(new Date(repairedBucket.period_end).toISOString(),"2026-02-28T16:00:00.000Z");assert.equal(repairedBucket.used_value,18);assert.equal(repairedBucket.limit_value,100);
   assert.equal(await scalar(admin,"select tier as value from public.api_entitlements where user_id=$1",[bootstrapId]),"owner");
@@ -111,6 +114,7 @@ try {
   console.log("PASS: V1.4.1 legacy data upgrades without loss; only fully proven matched segment retains valid metadata, stale payload kept historical, old daily summaries isolated.");
   console.log(`PASS: ${migrationCount} complete migrations on disposable PostgreSQL ${await scalar(admin, "select current_setting('server_version') as value")}; only historical Owner identity digest configured for synthetic test user.`);
   await admin.query("insert into auth.users(id,email,email_confirmed_at) select id::uuid, 'test-'||left(id,8)||'@example.invalid', now() from unnest($1::text[]) id", [[A,B,F,O]]);
+  assert.equal(await scalar(admin, "select exists(select 1 from public.profiles where user_id=$1) as value", [A]), true, "The auth trigger still creates a profile after execute privileges are revoked");
   await admin.query("update public.api_entitlements set tier=case user_id when $1::uuid then 'friend' when $2::uuid then 'owner' else tier end where user_id in($1::uuid,$2::uuid)", [F,O]);
   const a = await client("authenticated", A), b = await client("authenticated", B), service = await client("service_role");
 
@@ -133,10 +137,22 @@ try {
   const collision = await Promise.all([save(concurrentA, "records", { ...payload, content: "collision one" }, first.row.updated_at), save(concurrentB, "records", { ...payload, content: "collision two" }, first.row.updated_at)]);
   assert.equal(collision.filter(result => result.ok).length, 1); assert.equal(collision.filter(result => result.code === "CONFLICT").length, 1);
   assert.equal(Number(await scalar(b, "select count(*) as value from public.records where id=$1", [id])), 0, "RLS hides another user's records");
+  const deletionRecord=randomUUID();
+  const deletionCreated=await save(a,"records",{id:deletionRecord,user_id:A,record_type:"note",content:"delete test"});
+  const deletionUpdated=await save(a,"records",{id:deletionRecord,user_id:A,record_type:"note",content:"newer"},deletionCreated.row.updated_at);
+  assert.equal((await b.query("delete from public.records where id=$1 and user_id=$2 and updated_at=$3 returning id",[deletionRecord,A,deletionUpdated.row.updated_at])).rowCount,0,"A different account cannot delete the record");
+  assert.equal((await a.query("delete from public.records where id=$1 and user_id=$2 and updated_at=$3 returning id",[deletionRecord,A,deletionCreated.row.updated_at])).rowCount,0,"Stale edits cannot delete the newer record");
+  assert.equal((await a.query("delete from public.records where id=$1 and user_id=$2 and updated_at=$3 returning id",[deletionRecord,A,deletionUpdated.row.updated_at])).rowCount,1,"Owner can delete the exact current version");
   await rejectCode(b.query("insert into public.records(user_id,record_type,content) values($1,'note','cross owner')", [A]), "42501");
   await rejectCode(b.query("select public.consume_api_quota($1,null,'route',$2)", [B,randomUUID()]), "42501");
   await rejectCode(b.query("select * from public.client_mutation_receipts"), "42501");
   await rejectCode(b.query("select * from public.api_entitlements"), "42501");
+  const imagePath=`${A}/${randomUUID()}`;
+  await a.query("insert into storage.objects(bucket_id,name) values('record-images',$1)", [imagePath]);
+  await rejectCode(b.query("insert into storage.objects(bucket_id,name) values('record-images',$1)", [`${A}/${randomUUID()}`]), "42501");
+  assert.equal(Number(await scalar(b,"select count(*) as value from storage.objects where name=$1",[imagePath])),0,"Other accounts cannot access private record images");
+  const photoExpense=await save(a,"records",{id:randomUUID(),user_id:A,record_type:"expense",content:"photo expense",amount:1,currency:"JPY",expense_category:"food",image_path:imagePath});
+  assert.equal(photoExpense.ok,true,"An expense can reference a private image");
   await a.query("insert into storage.objects(bucket_id,name) values('avatars',$1)", [`${A}/test.png`]);
   await rejectCode(b.query("insert into storage.objects(bucket_id,name) values('avatars',$1)", [`${A}/other.png`]), "42501");
   assert.equal(Number(await scalar(b, "select count(*) as value from storage.objects where name=$1", [`${A}/test.png`])), 0);

@@ -1,12 +1,12 @@
 # 完整界面与样式精确参考
 
-快照：2026-11-12，V2.0.0本地修复候选工作树，未部署。由build-documentation-reference.mjs机械生成；每块保存原始字节和SHA256。
+快照：2026-11-12，V2.1.0 本地候选工作树，未声明部署。由 build-documentation-reference.mjs 机械生成；每块保存原始字节和 SHA256。
 
-先读[最新验收](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
+先读[验收记录](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL 含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
 
 ## src/App.tsx
 
-<!-- source: src/App.tsx sha256: 546b3f19731bb34a67253cdd3be521f0d499a9ea6b179ff50859cf89f82a6e07 encoding: utf8 -->
+<!-- source: src/App.tsx sha256: dde5fbdd3c68055ec0f02f410391ff57af7602502b575082fd37c0457cfc6a20 encoding: utf8 -->
 ````tsx
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
@@ -30,6 +30,7 @@ import { claimAutomaticSummary, loadAutomaticSummary, saveAutomaticSummary, list
 import type { SaveResult } from "./lib/syncEngine";
 import { HomeRouteSearch } from "./components/HomeRouteSearch";
 import { SyncStatusDialog } from "./components/SyncStatusDialog";
+import { RecordEditor } from "./components/RecordEditor";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -62,6 +63,7 @@ export default function App() {
   const [syncItems, setSyncItems] = useState<PendingMutation[]>([]);
   const [cloudReady, setCloudReady] = useState(false);
   const [showSyncIssues, setShowSyncIssues] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const activeOwner = useRef<string | undefined>(undefined);
   const summaryRequests = useRef(new Map<string, ReturnType<typeof generateDailySummary>>());
 
@@ -202,6 +204,47 @@ export default function App() {
     } catch (error) { showToast(error instanceof Error ? error.message : "保存失败，本地副本已保留"); throw error; }
   }
 
+  async function uploadRecordImage(file: File) {
+    if (!user || demoMode || !navigator.onLine) throw new Error("图片上传需要登录并联网。");
+    if (!["image/jpeg", "image/png", "image/webp", "image/heic"].includes(file.type) || file.size > 10 * 1024 * 1024 || file.size === 0) throw new Error("请选择不超过 10 MB 的 JPEG、PNG、WebP 或 HEIC 图片。");
+    const ownerId = user.id;
+    if ((await supabase.auth.getSession()).data.session?.user.id !== ownerId) throw new Error("账号已切换，请重新登录。");
+    const path = `${ownerId}/${crypto.randomUUID()}`;
+    const { error } = await supabase.storage.from("record-images").upload(path, file, { contentType: file.type, upsert: false });
+    if (error) throw new Error("图片上传失败，请检查网络和存储权限。");
+    if (activeOwner.current !== ownerId) throw new Error("账号已切换，图片未关联到记录。");
+    return path;
+  }
+
+  async function saveEditedRecord(record: LifeRecord) {
+    if (!user || record.user_id !== user.id || activeOwner.current !== user.id) throw new Error("账号已切换，请在原账号中保存。");
+    const current = data?.records.find(item => item.id === record.id);
+    if (!current || current.updated_at !== record.updated_at) throw new Error("记录已变化，请关闭编辑并核对最新内容。");
+    const saved = demoMode ? normalizeRecord(record as unknown as Record<string, unknown>) : savedRow<LifeRecord>(await persistRecord(record, record), user.id);
+    if (activeOwner.current !== user.id) throw new Error("账号已切换，请在原账号中查看结果。");
+    updateData(currentData => ({ ...currentData, records: currentData.records.map(item => item.id === record.id ? saved : item) }));
+  }
+
+  async function attachRecordImage(record: LifeRecord, file: File) {
+    const path = await uploadRecordImage(file);
+    await saveEditedRecord({ ...record, image_path: path });
+  }
+
+  async function deleteRecord(record: LifeRecord) {
+    if (!user || record.user_id !== user.id || record.record_type === "trip") throw new Error("无法删除此记录。");
+    if (demoMode) { updateData(current => ({ ...current, records: current.records.filter(item => item.id !== record.id) })); return; }
+    if (!navigator.onLine) throw new Error("删除需要联网，请先同步记录。");
+    const ownerId = user.id;
+    if ((await listMutations(ownerId)).some(item => item.table === "records" && item.entityId === record.id && !item.supersededBy)) throw new Error("这条记录还有待处理的同步内容，请先处理后再删除。");
+    if ((await supabase.auth.getSession()).data.session?.user.id !== ownerId) throw new Error("账号已切换。");
+    const { data: deleted, error } = await supabase.from("records").delete().eq("id", record.id).eq("user_id", ownerId).eq("updated_at", record.updated_at).select("id");
+    if (error) throw new Error("删除未确认，请刷新并检查网络后重试。");
+    if (!deleted?.length) throw new Error("记录可能已更改或删除，请刷新后核对。");
+    if (activeOwner.current !== ownerId) return;
+    updateData(current => ({ ...current, records: current.records.filter(item => item.id !== record.id) }));
+    showToast(record.image_path ? "记录已删除；关联图片仍保留在私有存储中" : "记录已删除");
+  }
+
   async function saveTrip(draft: TripDraft) {
     if (!user) throw new Error("尚未登录");
     const trip = makeTrip(user, draft);
@@ -315,25 +358,27 @@ export default function App() {
       <main className="app-main">
         {view === "timeline" && (
           <>
-            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{dailySummary || `${currentTrip.destination}，今天也去留下一点什么吧。`}</p></div><ChevronRight /></button>}
-            {currentTrip && !demoMode && !dailySummary && <p className="field-help">今日摘要在此设备自动尝试一次；若未生成，可在设置中手动生成。</p>}
+            <section className="home-heading" aria-label="今日概览"><p>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(clockNow)}</p><h1>你好，{data.profile.display_name || "朋友"}</h1></section>
+            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>进行中的行程 · 第 {currentDay} 天</small><strong>{currentTrip.name}</strong><p>{dailySummary || `${currentTrip.destination} · ${currentTrip.start_date} — ${currentTrip.end_date}`}</p></div><ChevronRight /></button>}
+            {currentTrip && !demoMode && !dailySummary && <p className="field-help">今日摘要未生成，可在设置中重试。</p>}
             <div className="home-quick-grid"><QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} /><HomeRouteSearch trips={data.trips} records={data.records} isDemo={demoMode} onSave={saveRecord} /></div>
             <div className="filter-row">
-              <div className="filter-tabs" role="tablist">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
+              <div className="filter-tabs" role="tablist" aria-label="记录类型">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
               <button className="planner-link" onClick={() => setView("planner")}><MapPinned size={16} />行程规划<ChevronRight size={15} /></button>
             </div>
             {filter === "expense" && <Suspense fallback={<div className="chart-loading glass-card"><LoaderCircle className="spin" />正在整理消费统计…</div>}><ExpenseStats records={data.records} rates={data.rates} baseCurrency={data.settings.base_currency} refreshing={refreshingRates} onRefresh={handleRateRefresh} /></Suspense>}
-            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} isDemo={demoMode} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() }).catch(() => undefined)} />
+            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} onEditRecord={setEditingRecordId} onDeleteRecord={deleteRecord} onAttachImage={attachRecordImage} onDetachImage={record => saveEditedRecord({ ...record, image_path: null })} isDemo={demoMode} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() }).catch(() => undefined)} />
           </>
         )}
-        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
+        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} onEditRecord={setEditingRecordId} onDeleteRecord={deleteRecord} onAttachImage={attachRecordImage} onDetachImage={record => saveEditedRecord({ ...record, image_path: null })} />}
         {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} isDemo={demoMode} summaryContext={summaryContext} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onResetDemo={() => { const next = resetDemoData(); setData(next); showToast("演示数据已重置"); }} onSignOut={() => { if (demoMode) { localStorage.removeItem("life-tracker-demo-active"); setDemoMode(false); setData(null); } else void supabase.auth.signOut(); }} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
+      {editingRecordId && data.records.find(item => item.id === editingRecordId) && <RecordEditor key={editingRecordId} record={data.records.find(item => item.id === editingRecordId)!} trips={data.trips} isDemo={demoMode} onClose={() => setEditingRecordId(null)} onSave={saveEditedRecord} onUpload={uploadRecordImage} />}
       {composerOpen && <div className="composer-modal"><div className="composer-modal-inner"><QuickComposer compact isDemo={demoMode} trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} onClose={() => setComposerOpen(false)} /></div></div>}
 
-      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
+      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" && filter !== "expense" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("all"); }}><ListFilter /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
 
       {toast && <div className="toast" role="status" aria-live="polite"><Sparkles size={15} />{toast}</div>}
       {showSyncIssues && <SyncStatusDialog key={user.id} items={ownerSyncItems} aiCopies={aiCopies} online={online} cloudReady={cloudReady} isDemo={demoMode} onClose={() => setShowSyncIssues(false)} onResolved={async () => { const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetrySave={async () => { if (!user) return; await retryFailedMutations(user.id); await syncOutbox(user.id); const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetryAi={async () => { if (!user) return; const result = await retryAiPersistence(user.id); if (activeOwner.current !== user.id) return; if (result.errors.length) throw new Error(result.errors.join("；")); showToast(`${result.saved} 份 AI 结果已保存，没有重新调用 AI`); }} />}
@@ -596,7 +641,7 @@ export function WhatsNew({ changelog, onDismiss }: { changelog: Changelog; onDis
 
 ## src/components/HomeRouteSearch.tsx
 
-<!-- source: src/components/HomeRouteSearch.tsx sha256: d09d84892f743d6cabe2300981cb709a26fa377155ca20366e05c6b8653cf298 encoding: utf8 -->
+<!-- source: src/components/HomeRouteSearch.tsx sha256: 77547398b03113aa10f525df6caf277f5abb0eb34dfe60435357edae2cb98593 encoding: utf8 -->
 ````tsx
 import { useMemo, useState, type FormEvent } from "react";
 import { ArrowRight, CalendarDays, Clock3, LoaderCircle, MapPin, Route, Save, Sparkles, X } from "lucide-react";
@@ -713,7 +758,7 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
   const selectedTrip = availableTrips.find((trip) => trip.id === tripId);
 
   return <>
-    <button className="home-route-entry glass-card" type="button" onClick={() => setOpen(true)}><span><Route size={21} /></span><div><b>AI 路线查询</b><small>不用先建行程，随时问两地之间怎么走</small></div><ArrowRight size={18} /></button>
+    <button className="home-route-entry glass-card" type="button" onClick={() => setOpen(true)}><span><Route size={21} /></span><div><b>路线查询</b><small>AI 帮你规划两地路线</small></div><ArrowRight size={18} /></button>
     {open && <div className="modal-backdrop"><section className="modal-card glass-card home-route-modal" role="dialog" aria-modal="true" aria-labelledby="home-route-title"><header><div><p className="eyebrow">快速路线</p><h2 id="home-route-title">从哪里，到哪里？</h2></div><button className="icon-button" type="button" aria-label="关闭路线查询" onClick={close}><X /></button></header>
       <form className="home-route-query" onSubmit={query}><label><span><MapPin size={14} />出发地</span><input autoFocus value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="例如 UCSB 加大圣塔芭芭拉分校" maxLength={120} required /></label><label><span><Route size={14} />目的地</span><input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="例如 洛杉矶机场" maxLength={120} required /></label><button className="primary-button" disabled={loading || !origin.trim() || !destination.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{loading ? "正在规划…" : "查询路线"}</button></form>
       {error && <p className="field-error" role="alert">{error}</p>}
@@ -729,7 +774,7 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
 
 ## src/components/LoginScreen.tsx
 
-<!-- source: src/components/LoginScreen.tsx sha256: 89e89a28fcf3f6483c9268a01331f88385479c2288e924a1924e382f1267e627 encoding: utf8 -->
+<!-- source: src/components/LoginScreen.tsx sha256: 9e7e737bde8ad4425598db9ac857d0ae6ef54092fbf5dbaf86e47f8400690709 encoding: utf8 -->
 ````tsx
 import { useState, type FormEvent } from "react";
 import { ArrowRight, FlaskConical, KeyRound, Mail, MapPinned, NotebookPen, ReceiptText, ShieldCheck, Sparkles } from "lucide-react";
@@ -783,25 +828,24 @@ export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> 
       <section className="login-layout">
         <div className="login-story">
           <div className="brand-mark"><BrandLogo className="login-brand-logo" /> Life Tracker</div>
-          <h1>把生活的片段，<br /><span>好好收在一起。</span></h1>
-          <p>旅行足迹、每一笔消费和突然闪过的念头，都能在几秒内记下。</p>
+          <h1>生活记录，<br /><span>行程规划。</span></h1>
           <div className="feature-row">
-            <div><span className="feature-icon coral"><ReceiptText size={19} /></span><b>消费</b><small>金额与分类统计</small></div>
-            <div><span className="feature-icon blue"><MapPinned size={19} /></span><b>行程</b><small>计划与实际打通</small></div>
-            <div><span className="feature-icon violet"><NotebookPen size={19} /></span><b>随记</b><small>留住日常瞬间</small></div>
+            <div><span className="feature-icon coral"><ReceiptText size={19} /></span><b>消费</b></div>
+            <div><span className="feature-icon blue"><MapPinned size={19} /></span><b>行程</b></div>
+            <div><span className="feature-icon violet"><NotebookPen size={19} /></span><b>随记</b></div>
           </div>
         </div>
 
         <div className="glass-card login-card">
           <div className="login-card-heading">
             <span className="mail-badge"><Mail size={22} /></span>
-            <div><h2>登录你的记录空间</h2><p>无需密码，输入邮件验证码即可登录。</p></div>
+            <div><h2>邮箱登录</h2><p>使用邮箱验证码，无需密码。</p></div>
           </div>
           {status === "code" || status === "verifying" ? (
             <div className="sent-state">
               <span className="success-ring"><KeyRound size={28} /></span>
               <h3>验证码已发送</h3>
-              <p>请输入发送到 <strong>{email}</strong> 的 6 位数字验证码。无需点击链接，也不会跳转到 Safari。</p>
+              <p>输入发送至 <strong>{email}</strong> 的 6 位验证码。</p>
               <form className="otp-form" onSubmit={verifyCode}>
                 <label htmlFor="otp-code">邮箱验证码</label>
                 <input id="otp-code" className="otp-code-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} autoFocus value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" aria-invalid={Boolean(error)} required />
@@ -818,12 +862,12 @@ export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> 
               <button className="primary-button full" disabled={status === "sending"}>
                 {status === "sending" ? "正在发送…" : "发送邮箱验证码"}<ArrowRight size={18} />
               </button>
-              <p className="form-hint">首次使用会自动创建账号，无需单独注册。</p>
-              <div className="login-limits"><Sparkles size={15} /><p>普通账号：航班实际信息每天 2 次，路线查询、记账识别与随记润色每天共用 15 次。朋友邀请码可在登录后于设置中兑换，记录与手动规划不受额度限制。</p></div>
+              <p className="form-hint">首次登录将自动创建账号。</p>
+              <div className="login-limits"><Sparkles size={15} /><p>普通账号每天可查航班 2 次，AI 功能共 15 次。邀请码可在登录后的设置中兑换；手动记录不限次数。</p></div>
             </form>
           )}
-          <div className="demo-entry"><span>或者先看看完整功能</span><button className="secondary-button full" disabled={demoLoading} onClick={async () => { setDemoLoading(true); setError(""); try { await onStartDemo(); } catch (demoError) { setError(demoError instanceof Error ? demoError.message : "暂时无法进入演示模式"); } finally { setDemoLoading(false); } }}><FlaskConical size={17} />{demoLoading ? "正在准备演示…" : "进入演示模式"}</button><small>无需邮箱。数据只保存在当前设备；航班使用模拟信息，AI 每台设备每天可体验 2 次。</small></div>
-          <div className="privacy-note"><ShieldCheck size={17} /><span>登录后，你将拥有完全独立的账号与数据空间——你的记录只有你自己能看到，不会与其他用户共享。</span></div>
+          <div className="demo-entry"><button className="secondary-button full" disabled={demoLoading} onClick={async () => { setDemoLoading(true); setError(""); try { await onStartDemo(); } catch (demoError) { setError(demoError instanceof Error ? demoError.message : "暂时无法进入演示模式"); } finally { setDemoLoading(false); } }}><FlaskConical size={17} />{demoLoading ? "正在准备演示…" : "试用演示模式"}</button><small>演示数据保存在本机；航班为模拟信息，AI 每台设备每天 2 次。</small></div>
+          <div className="privacy-note"><ShieldCheck size={17} /><span>账号数据相互隔离，不与其他用户共享。</span></div>
         </div>
       </section>
       <footer className="app-footer">© 2026 Sherlock Zang.</footer>
@@ -835,9 +879,9 @@ export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> 
 
 ## src/components/Planner.tsx
 
-<!-- source: src/components/Planner.tsx sha256: 4c90a122a50334f1b16f602ef88aef7bec410789e3b4a4a8ff3be37c2ad7c72f encoding: utf8 -->
+<!-- source: src/components/Planner.tsx sha256: 76644de5071dfd815d89e5150a4624f9d48a1a0ea40ddd47cf6630b0db600852 encoding: utf8 -->
 ````tsx
-import { useMemo, useState, type FormEvent } from "react";
+import { useContext, useMemo, useState, type FormEvent } from "react";
 import { DndContext, PointerSensor, TouchSensor, closestCenter, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -848,6 +892,9 @@ import { dateInZone, zonedDateTimeToIso } from "../lib/tripDates";
 import { getTransportPresentation } from "../lib/transport";
 import { detectTimeZone, TIMEZONE_OPTIONS, timeZoneLabel } from "../lib/timezones";
 import { QuickComposer } from "./QuickComposer";
+import { RecordActions } from "./RecordActions";
+import { RecordImage } from "./RecordImage";
+import { RecordPhotoAction, RecordPhotoContext } from "./RecordPhotoAction";
 import { TransportDetailsPanel, TransportPlanEditor, type PlanKind } from "./TransportPlanEditor";
 import { generateTripRecap } from "../lib/ai";
 import { flightMoveOffset, flightTripPlacement } from "../lib/flightTripPlacement";
@@ -865,6 +912,10 @@ interface Props {
   onUpdateTrip: (trip: Trip) => Promise<void>;
   onSaveRecord: (draft: RecordDraft) => Promise<void>;
   onUpdateRecord: (record: LifeRecord, serverConfirmed?: boolean) => Promise<void>;
+  onEditRecord: (id: string) => void;
+  onDeleteRecord: (record: LifeRecord) => Promise<void>;
+  onAttachImage: (record: LifeRecord, file: File) => Promise<void>;
+  onDetachImage: (record: LifeRecord) => Promise<void>;
   initialTripId?: string;
   baseCurrency: Currency;
   isDemo?: boolean;
@@ -909,7 +960,7 @@ function orderedTrips(trips: Trip[]) {
   });
 }
 
-export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord, onUpdateRecord, initialTripId, baseCurrency, isDemo = false }: Props) {
+export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, onAttachImage, onDetachImage, initialTripId, baseCurrency, isDemo = false }: Props) {
   const [selectedId, setSelectedId] = useState(initialTripId || "");
   const [showCreate, setShowCreate] = useState(false);
   const selected = trips.find((trip) => trip.id === selectedId);
@@ -917,7 +968,7 @@ export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord
   if (!selected) {
     return (
       <section className="planner-home">
-        <div className="section-hero"><div><p className="eyebrow">行程规划</p><h1>先把期待，排进日历。</h1><p>按天安排地点与事项，出发后直接打卡，还能把实际消费和随记挂在计划下面。</p></div><button className="primary-button" onClick={() => setShowCreate(true)}><Plus size={17} />创建行程</button></div>
+        <div className="section-hero"><div><h1>行程</h1></div><button className="primary-button" onClick={() => setShowCreate(true)}><Plus size={17} />创建行程</button></div>
         {showCreate && <TripForm onClose={() => setShowCreate(false)} onSave={async (draft) => { const trip = await onSaveTrip(draft); setSelectedId(trip.id); setShowCreate(false); }} />}
         <div className="trip-grid">
           {orderedTrips(trips).map((trip) => {
@@ -925,14 +976,14 @@ export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord
             const completed = records.filter((record) => record.trip_id === trip.id && record.record_type === "trip" && record.plan_status === "completed").length;
             return <button className="trip-card glass-card" onClick={() => setSelectedId(trip.id)} key={trip.id}><span className="trip-card-icon"><Route /></span><div><p>{trip.destination}</p><h3>{trip.name}</h3><span><CalendarDays size={14} />{trip.start_date.replaceAll("-", ".")} — {trip.end_date.replaceAll("-", ".")}</span></div><div className="trip-progress"><b>{completed}/{planCount || 0}</b><small>已完成</small></div><ChevronRight /></button>;
           })}
-          {!trips.length && <div className="empty-planner glass-card"><span><Route /></span><h3>还没有行程</h3><p>创建下一次出发，把机票、酒店和想去的地方提前放进来。</p><button className="secondary-button" onClick={() => setShowCreate(true)}>创建第一个行程</button></div>}
+          {!trips.length && <div className="empty-planner glass-card"><span><Route /></span><h3>还没有行程</h3><p>添加目的地、交通和住宿。</p><button className="secondary-button" onClick={() => setShowCreate(true)}>创建行程</button></div>}
         </div>
       </section>
     );
   }
 
   if (!validTimeZone(selected.timezone)) return <section className="planner-home"><h2>请先修正这段行程的时区</h2><p>旧记录不会删除。选择标准时区后即可重新查看日期规划。</p><TripForm trip={selected} onClose={() => setSelectedId("")} onSave={async draft => { await onUpdateTrip({ ...selected, ...draft, updated_at: new Date().toISOString() }); }} /></section>;
-  return <TripBoard trip={selected} records={records} onBack={() => setSelectedId("")} onUpdateTrip={onUpdateTrip} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} baseCurrency={baseCurrency} isDemo={isDemo} />;
+  return <RecordPhotoContext.Provider value={{ onAttach: onAttachImage, onDetach: onDetachImage }}><TripBoard trip={selected} records={records} onBack={() => setSelectedId("")} onUpdateTrip={onUpdateTrip} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} baseCurrency={baseCurrency} isDemo={isDemo} /></RecordPhotoContext.Provider>;
 }
 
 function TripForm({ trip, records = [], onSave, onClose }: { trip?: Trip; records?: LifeRecord[]; onSave: (draft: TripDraft) => Promise<void>; onClose: () => void }) {
@@ -959,7 +1010,7 @@ function TripForm({ trip, records = [], onSave, onClose }: { trip?: Trip; record
   return <div className="modal-backdrop"><form className="modal-card glass-card trip-form" onSubmit={submit}><header><div><p className="eyebrow">{trip ? "编辑行程" : "新行程"}</p><h2>{trip ? "调整这段旅程" : "下一站去哪里？"}</h2></div><button type="button" className="icon-button" aria-label="关闭行程编辑" onClick={onClose}><X /></button></header><label>行程名称<input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：悉尼夏日漫游" required /></label><label>目的地<input value={draft.destination} onChange={(event) => updateDestination(event.target.value)} placeholder="城市或国家" required /></label><div className="form-row"><label>开始日期<input type="date" value={draft.start_date} onChange={(event) => setDraft({ ...draft, start_date: event.target.value, end_date: event.target.value > draft.end_date ? event.target.value : draft.end_date })} required /></label><label>结束日期<input type="date" min={draft.start_date} value={draft.end_date} onChange={(event) => setDraft({ ...draft, end_date: event.target.value })} required /></label></div><label>行程时区<select value={draft.timezone} onChange={(event) => { setDraft({ ...draft, timezone: event.target.value }); setTimezoneMode("manual"); }} required>{TIMEZONE_OPTIONS.map((timezone) => <option value={timezone} key={timezone}>{timeZoneLabel(timezone)}</option>)}</select><span className="field-help">{timezoneMode === "detected" ? "已根据目的地自动匹配，可手动调整" : timezoneMode === "manual" ? "已选择标准 IANA 时区" : "输入目的地后自动匹配；当前暂用设备时区"}</span></label>{saveError && <p className="field-error">{saveError}</p>}<footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving}>{saving ? "保存中…" : trip ? "保存行程" : "创建行程"}</button></footer></form></div>;
 }
 
-function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdateRecord, baseCurrency, isDemo }: { trip: Trip; records: LifeRecord[]; onBack: () => void; onUpdateTrip: Props["onUpdateTrip"]; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; baseCurrency: Currency; isDemo: boolean }) {
+function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, baseCurrency, isDemo }: { trip: Trip; records: LifeRecord[]; onBack: () => void; onUpdateTrip: Props["onUpdateTrip"]; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; baseCurrency: Currency; isDemo: boolean }) {
   const [addingDay, setAddingDay] = useState<string | null>(null);
   const [addingKind, setAddingKind] = useState<PlanKind>("general");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -1029,7 +1080,7 @@ function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdate
         <div className="day-board">
           {days.map((day, index) => {
             const items = plans.filter((item) => !item.schedule_details && planDate(item, trip) === day).sort(chronological);
-            return <DayColumn key={day} day={day} dayNumber={index + 1} items={items} scheduleEntries={scheduleDayEntries(plans, day)} records={records} expanded={expanded} onExpand={setExpanded} onAdd={() => { setAddingKind("general"); setAddingDay(day); }} onAddSchedule={() => { setAddingKind("all_day"); setAddingDay(day); }} addingKind={addingKind} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} trip={trip} adding={addingDay === day} onCloseAdd={() => setAddingDay(null)} baseCurrency={baseCurrency} isDemo={isDemo} />;
+            return <DayColumn key={day} day={day} dayNumber={index + 1} items={items} scheduleEntries={scheduleDayEntries(plans, day)} records={records} expanded={expanded} onExpand={setExpanded} onAdd={() => { setAddingKind("general"); setAddingDay(day); }} onAddSchedule={() => { setAddingKind("all_day"); setAddingDay(day); }} addingKind={addingKind} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} trip={trip} adding={addingDay === day} onCloseAdd={() => setAddingDay(null)} baseCurrency={baseCurrency} isDemo={isDemo} />;
           })}
         </div>
       </DndContext>
@@ -1040,12 +1091,13 @@ function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdate
   );
 }
 
-function DayColumn({ day, dayNumber, items, scheduleEntries, records, expanded, onExpand, onAdd, onAddSchedule, addingKind, onSaveRecord, onUpdateRecord, trip, adding, onCloseAdd, baseCurrency, isDemo }: { day: string; dayNumber: number; items: LifeRecord[]; scheduleEntries: ScheduleDayEntry[]; records: LifeRecord[]; expanded: string | null; onExpand: (id: string | null) => void; onAdd: () => void; onAddSchedule: () => void; addingKind: PlanKind; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; trip: Trip; adding: boolean; onCloseAdd: () => void; baseCurrency: Currency; isDemo: boolean }) {
+function DayColumn({ day, dayNumber, items, scheduleEntries, records, expanded, onExpand, onAdd, onAddSchedule, addingKind, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, trip, adding, onCloseAdd, baseCurrency, isDemo }: { day: string; dayNumber: number; items: LifeRecord[]; scheduleEntries: ScheduleDayEntry[]; records: LifeRecord[]; expanded: string | null; onExpand: (id: string | null) => void; onAdd: () => void; onAddSchedule: () => void; addingKind: PlanKind; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; trip: Trip; adding: boolean; onCloseAdd: () => void; baseCurrency: Currency; isDemo: boolean }) {
   const droppable = useDroppable({ id: `day:${day}` });
-  return <section ref={droppable.setNodeRef} className={`day-column ${droppable.isOver ? "drag-over" : ""}`}><header><div><strong>Day {dayNumber}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date(`${day}T12:00:00`))}</span></div><button className="icon-button" aria-label={`为 Day ${dayNumber} 添加计划`} onClick={onAdd}><Plus size={18} /></button></header>{adding && <TransportPlanEditor key={`${day}-${addingKind}`} initialKind={addingKind} day={day} trip={trip} count={items.length} isDemo={isDemo} onClose={onCloseAdd} onSave={onSaveRecord} />}<ScheduleDaySection day={day} trip={trip} entries={scheduleEntries} isDemo={isDemo} onAdd={onAddSchedule} onSave={onSaveRecord} onUpdate={onUpdateRecord} /><SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}><div className="plan-list">{items.map((item) => <SortablePlan key={item.id} item={item} actualRecords={records.filter((record) => record.parent_plan_id === item.id)} expanded={expanded === item.id} onExpand={() => onExpand(expanded === item.id ? null : item.id)} onUpdate={onUpdateRecord} onSaveRecord={onSaveRecord} trip={trip} baseCurrency={baseCurrency} isDemo={isDemo} />)}{!items.length && !adding && <button className="empty-day" onClick={onAdd}><CirclePlus size={20} /><span>{scheduleEntries.length ? "这一天还没有定时安排" : "这一天还没有安排"}</span><small>点这里添加，或把其他计划拖过来</small></button>}</div></SortableContext></section>;
+  return <section ref={droppable.setNodeRef} className={`day-column ${droppable.isOver ? "drag-over" : ""}`}><header><div><strong>Day {dayNumber}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date(`${day}T12:00:00`))}</span></div><button className="icon-button" aria-label={`为 Day ${dayNumber} 添加计划`} onClick={onAdd}><Plus size={18} /></button></header>{adding && <TransportPlanEditor key={`${day}-${addingKind}`} initialKind={addingKind} day={day} trip={trip} count={items.length} isDemo={isDemo} onClose={onCloseAdd} onSave={onSaveRecord} />}<ScheduleDaySection day={day} trip={trip} entries={scheduleEntries} isDemo={isDemo} onAdd={onAddSchedule} onSave={onSaveRecord} onUpdate={onUpdateRecord} /><SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}><div className="plan-list">{items.map((item) => <SortablePlan key={item.id} item={item} actualRecords={records.filter((record) => record.parent_plan_id === item.id)} expanded={expanded === item.id} onExpand={() => onExpand(expanded === item.id ? null : item.id)} onUpdate={onUpdateRecord} onSaveRecord={onSaveRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} trip={trip} baseCurrency={baseCurrency} isDemo={isDemo} />)}{!items.length && !adding && <button className="empty-day" onClick={onAdd}><CirclePlus size={20} /><span>{scheduleEntries.length ? "这一天还没有定时安排" : "这一天还没有安排"}</span><small>点这里添加，或把其他计划拖过来</small></button>}</div></SortableContext></section>;
 }
 
-function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSaveRecord, trip, baseCurrency, isDemo }: { item: LifeRecord; actualRecords: LifeRecord[]; expanded: boolean; onExpand: () => void; onUpdate: Props["onUpdateRecord"]; onSaveRecord: Props["onSaveRecord"]; trip: Trip; baseCurrency: Currency; isDemo: boolean }) {
+function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSaveRecord, onEditRecord, onDeleteRecord, trip, baseCurrency, isDemo }: { item: LifeRecord; actualRecords: LifeRecord[]; expanded: boolean; onExpand: () => void; onUpdate: Props["onUpdateRecord"]; onSaveRecord: Props["onSaveRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; trip: Trip; baseCurrency: Currency; isDemo: boolean }) {
+  const photo = useContext(RecordPhotoContext);
   const sortable = useSortable({ id: item.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
   const [actualMode, setActualMode] = useState<"standard" | "route" | null>(null);
@@ -1065,8 +1117,10 @@ function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSav
       {flight && placement && (placement.startsBeforeTrip || placement.day !== flight.departure.date) && <p className="plan-flight-carryover">{placement.startsBeforeTrip ? "行程开始前出发，归入首日。" : "按行程时区归入本日。"}原计划当地起飞 {flight.departure.date} {flight.departure.time}（{flight.departure.iata}） → 当地到达 {flight.arrival.date} {flight.arrival.time}（{flight.arrival.iata}）</p>}
       {expanded && <div className="plan-expanded">
         <TransportDetailsPanel record={item} isDemo={isDemo} onUpdate={onUpdate} onEdit={() => setEditing(true)} />
+        <RecordImage path={item.image_path} ownerId={item.user_id} isDemo={isDemo} />
+        {photo && <RecordPhotoAction record={item} isDemo={isDemo} onAttach={photo.onAttach} onDetach={photo.onDetach} />}
         <div className="actual-heading"><span>实际发生</span><small>{actualRecords.length} 条记录</small></div>
-        {actualRecords.map((record) => <div className={`actual-row ${record.record_type}`} key={record.id}><span>{record.record_type === "expense" ? "消费" : "随记"}</span><div><b>{record.content}</b><small>{formatDateTime(record.event_at)}</small></div>{record.amount != null && record.currency && <strong>{formatMoney(record.amount, record.currency)}</strong>}</div>)}
+        {actualRecords.map((record) => <div className={`actual-row ${record.record_type}`} key={record.id}><span>{record.record_type === "expense" ? "消费" : "随记"}</span><div><b>{record.content}</b><small>{formatDateTime(record.event_at)}</small><RecordImage path={record.image_path} ownerId={record.user_id} isDemo={isDemo} /><RecordActions record={record} onEdit={onEditRecord} onDelete={onDeleteRecord} /></div>{record.amount != null && record.currency && <strong>{formatMoney(record.amount, record.currency)}</strong>}</div>)}
         {actualMode ? <QuickComposer compact isDemo={isDemo} trips={[]} defaultCurrency={baseCurrency} forcedTripId={trip.id} parentPlanId={item.id} defaultType={actualMode === "route" ? "note" : undefined} initialContent={actualMode === "route" ? "实际路线" : undefined} initialNotes={actualMode === "route" ? suggestedRoute : undefined} onSave={onSaveRecord} onClose={() => setActualMode(null)} /> : <div className="actual-actions"><button className="add-actual" onClick={() => setActualMode("standard")}><Plus size={15} />添加消费或随记</button>{item.transport_type === "metro" && <button className="add-actual route-actual" onClick={() => setActualMode("route")}><Route size={15} />补记实际路线</button>}</div>}
         <div className="plan-status-actions"><button className={item.plan_status === "planned" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "planned", updated_at: new Date().toISOString() }).catch(() => undefined)}><Clock3 size={14} />计划中</button><button className={item.plan_status === "completed" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "completed", updated_at: new Date().toISOString() }).catch(() => undefined)}><Check size={14} />已完成</button><button className={item.plan_status === "cancelled" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "cancelled", updated_at: new Date().toISOString() }).catch(() => undefined)}><X size={14} />已取消</button></div>
       </div>}
@@ -1104,7 +1158,7 @@ export function ProfileAvatar({ profile, className = "", imageUrl }: Props) {
 
 ## src/components/QuickComposer.tsx
 
-<!-- source: src/components/QuickComposer.tsx sha256: ecc11ef1be9658ececb444a65f717f0d71300f7736f4b85c1e006ef1d4c098c1 encoding: utf8 -->
+<!-- source: src/components/QuickComposer.tsx sha256: 8b291250b79b4c8c9cff45a2f11cfdf134caf123abe6c10c20cc186d4eb23ce1 encoding: utf8 -->
 ````tsx
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CalendarDays, ChevronDown, Coffee, LoaderCircle, MapPin, NotebookPen, Plus, ReceiptText, Route, Send, ShoppingBag, Sparkles, Ticket, TrainFront, X } from "lucide-react";
@@ -1225,7 +1279,7 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
     return (
       <button className="quick-collapsed glass-card" onClick={() => setOpen(true)}>
         <span className="quick-plus"><Plus size={22} /></span>
-        <span><b>现在，想记下什么？</b><small>消费、行程或一个念头</small></span>
+        <span><b>记一笔</b><small>消费、行程、随记</small></span>
         <span className="quick-types"><ReceiptText /><Route /><NotebookPen /></span>
       </button>
     );
@@ -1274,6 +1328,184 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
       {polishPreview && <div className="nested-modal-backdrop"><section className="modal-card glass-card ai-preview-modal"><header><div><p className="eyebrow">润色预览</p><h2>选择保留哪一版</h2></div><button type="button" className="icon-button" onClick={() => setPolishPreview("")}><X /></button></header><div className="note-compare"><article><b>原文</b><p>{content}</p></article><article><b>润色后</b><p>{polishPreview}</p></article></div><footer><button type="button" className="secondary-button" onClick={() => setPolishPreview("")}>保留原文</button><button type="button" className="primary-button" onClick={() => { setContent(polishPreview); setPolishPreview(""); }}>采用润色版本</button></footer></section></div>}
     </form>
   );
+}
+
+````
+
+## src/components/RecordActions.tsx
+
+<!-- source: src/components/RecordActions.tsx sha256: 9289b173c831071dfbb04329cdeb1fc3ba89e936009988eaba1866ac70a177b8 encoding: utf8 -->
+````tsx
+import { useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
+import type { LifeRecord } from "../types";
+
+export function RecordActions({ record, onEdit, onDelete }: { record: LifeRecord; onEdit: (id: string) => void; onDelete: (record: LifeRecord) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function remove() {
+    const warning = record.image_path ? "删除这条记录？关联图片会保留在私有存储中。" : "删除这条记录？此操作无法撤销。";
+    if (!window.confirm(warning)) return;
+    setBusy(true); setError("");
+    try { await onDelete(record); } catch (failure) { setError(failure instanceof Error ? failure.message : "删除失败，请重试。"); }
+    finally { setBusy(false); }
+  }
+  return <div className="record-action-group"><div className="record-control-buttons"><button type="button" className="record-control-button" aria-label={`编辑${record.content}`} disabled={busy} onClick={() => onEdit(record.id)}><Pencil size={15} />编辑</button><button type="button" className="record-control-button" aria-label={`删除${record.content}`} disabled={busy} onClick={() => void remove()}><Trash2 size={15} />{busy ? "删除中…" : "删除"}</button></div>{error && <p className="field-error" role="alert">{error}</p>}</div>;
+}
+
+````
+
+## src/components/RecordEditor.tsx
+
+<!-- source: src/components/RecordEditor.tsx sha256: ed60cd0581e354f25ddf8c9786b29a39da6fa24eff88775353a378b8343be09b encoding: utf8 -->
+````tsx
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { X } from "lucide-react";
+import type { Currency, ExpenseCategory, LifeRecord, Trip } from "../types";
+import { CATEGORY_META, CURRENCIES } from "../types";
+import { flightTimeOptions, utcOffsetLabel } from "../../supabase/functions/_shared/flightTime";
+
+function localInput(iso: string) {
+  const date = new Date(iso);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+export function RecordEditor({ record, trips, isDemo, onClose, onSave, onUpload }: {
+  record: LifeRecord; trips: Trip[]; isDemo: boolean; onClose: () => void;
+  onSave: (record: LifeRecord) => Promise<void>; onUpload: (file: File) => Promise<string>;
+}) {
+  const [original] = useState(record);
+  const [content, setContent] = useState(record.content);
+  const [notes, setNotes] = useState(record.notes || "");
+  const [location, setLocation] = useState(record.location || "");
+  const [amount, setAmount] = useState(record.amount == null ? "" : String(record.amount));
+  const [currency, setCurrency] = useState<Currency>(record.currency || "CNY");
+  const [category, setCategory] = useState<ExpenseCategory>(record.expense_category || "other");
+  const [eventAt, setEventAt] = useState(() => localInput(record.event_at));
+  const [offset, setOffset] = useState("");
+  const [tripId, setTripId] = useState(record.trip_id || "");
+  const [imagePath, setImagePath] = useState(record.image_path);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const closeRef = useRef(onClose);
+  const savingRef = useRef(saving);
+  useEffect(() => { closeRef.current = onClose; savingRef.current = saving; }, [onClose, saving]);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])') || []).filter(element => element.getClientRects().length > 0);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !savingRef.current) { event.preventDefault(); closeRef.current(); }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items[items.length - 1].focus(); }
+      else if (!event.shiftKey && document.activeElement === items[items.length - 1]) { event.preventDefault(); items[0].focus(); }
+    };
+    focusable()[0]?.focus();
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); if (previous?.isConnected) previous.focus(); };
+  }, []);
+  let timeOptions: ReturnType<typeof flightTimeOptions> = [];
+  try { if (eventAt !== localInput(original.event_at)) timeOptions = flightTimeOptions({ date: eventAt.slice(0, 10), time: eventAt.slice(11), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }); } catch { /* Report invalid local clocks on save. */ }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    const changedTime = eventAt !== localInput(original.event_at);
+    if (changedTime && !timeOptions.length) { setError("时间无效或因夏令时不存在，请重新选择。"); return; }
+    if (changedTime && timeOptions.length > 1 && !offset) { setError("此时间因夏令时出现两次，请选择第一次或第二次。"); return; }
+    const chosen = timeOptions.find(item => String(item.utcOffsetMinutes) === offset) || timeOptions[0];
+    if (record.record_type === "expense" && (!amount.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0)) { setError("请输入有效金额。"); return; }
+    setSaving(true);
+    try {
+      await onSave({ ...original, content: content.trim(), notes: notes.trim() || null, location: location.trim() || null,
+        event_at: changedTime ? new Date(chosen.instant).toISOString() : original.event_at, trip_id: tripId || null,
+        amount: record.record_type === "expense" ? Number(amount) : null,
+        currency: record.record_type === "expense" ? currency : null,
+        expense_category: record.record_type === "expense" ? category : null, image_path: imagePath });
+      onClose();
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "保存失败，请重试。"); }
+    finally { setSaving(false); }
+  }
+
+  async function chooseImage(file?: File) {
+    if (!file) return;
+    setError(""); setSaving(true);
+    try { setImagePath(await onUpload(file)); }
+    catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "图片上传失败。"); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="modal-backdrop"><form ref={dialogRef} className="modal-card glass-card record-editor" role="dialog" aria-modal="true" aria-labelledby="record-edit-title" onSubmit={submit}>
+    <header><h2 id="record-edit-title">编辑{record.record_type === "expense" ? "消费" : "随记"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X /></button></header>
+    <label>内容<input value={content} onChange={event => setContent(event.target.value)} required maxLength={4000} /></label>
+    {record.record_type === "expense" && <div className="form-row"><label>金额<input type="number" min="0" step="any" value={amount} onChange={event => setAmount(event.target.value)} required /></label><label>币种<select value={currency} onChange={event => setCurrency(event.target.value as Currency)}>{CURRENCIES.map(item => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label>分类<select value={category} onChange={event => setCategory(event.target.value as ExpenseCategory)}>{Object.entries(CATEGORY_META).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select></label></div>}
+    <label>时间 <small>设备当地时间</small><input type="datetime-local" value={eventAt} onChange={event => { setEventAt(event.target.value); setOffset(""); }} required /></label>
+    {timeOptions.length > 1 && <label>重复时间 <small>请选择第一次或第二次</small><select value={offset} onChange={event => setOffset(event.target.value)} required><option value="">请选择</option>{timeOptions.map((item, index) => <option key={item.utcOffsetMinutes} value={item.utcOffsetMinutes}>{index === 0 ? "第一次" : "第二次"} · {utcOffsetLabel(item.utcOffsetMinutes)}</option>)}</select></label>}
+    <label>地点 <small>选填</small><input value={location} onChange={event => setLocation(event.target.value)} /></label>
+    {!record.parent_plan_id && <label>关联行程 <small>选填</small><select value={tripId} onChange={event => setTripId(event.target.value)}><option value="">不关联行程</option>{trips.map(trip => <option key={trip.id} value={trip.id}>{trip.name}</option>)}</select></label>}
+    <label>备注 <small>选填</small><textarea value={notes} onChange={event => setNotes(event.target.value)} rows={3} /></label>
+    <div className="record-image-editor"><b>图片</b>{isDemo ? <small>演示模式暂不上传图片</small> : <><label className="secondary-button file-picker">{imagePath ? "更换图片" : "上传图片"}<input className="file-input-accessible" aria-label={imagePath ? "更换图片" : "上传图片"} type="file" accept="image/jpeg,image/png,image/webp,image/heic" disabled={saving} onChange={event => { void chooseImage(event.target.files?.[0]); event.target.value = ""; }} /></label>{imagePath && <button type="button" className="text-button" onClick={() => setImagePath(null)}>移除关联</button>}<small>单张最大 10 MB，需联网。图片会立即上传；取消、更换或移除关联不会删除私有存储中的原图。</small></>}</div>
+    {error && <p className="field-error" role="alert">{error}</p>}
+    <footer><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>取消</button><button className="primary-button" disabled={saving || !content.trim()}>{saving ? "处理中…" : "保存"}</button></footer>
+  </form></div>;
+}
+
+````
+
+## src/components/RecordImage.tsx
+
+<!-- source: src/components/RecordImage.tsx sha256: 49bcf824b22963f9ca13a753de11b829dbe8ba336ecb4462d25d027e7d43be61 encoding: utf8 -->
+````tsx
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
+
+export function RecordImage({ path, ownerId, isDemo }: { path: string | null; ownerId: string; isDemo: boolean }) {
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setUrl(""); setError(false);
+    if (!path || isDemo || !path.startsWith(`${ownerId}/`)) return;
+    void (async () => {
+      const { data: session } = await supabase.auth.getSession();
+      if (session.session?.user.id !== ownerId) throw new Error("Account changed");
+      const result = await supabase.storage.from("record-images").createSignedUrl(path, 60);
+      if (result.error || !result.data?.signedUrl) throw result.error || new Error("Image unavailable");
+      if (!cancelled) setUrl(result.data.signedUrl);
+    })().catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [path, ownerId, isDemo]);
+  if (!path) return null;
+  if (error || !path.startsWith(`${ownerId}/`)) return <small className="record-image-error">图片暂不可用</small>;
+  return url ? <img className="record-image" src={url} alt="记录图片" onError={() => setError(true)} /> : <small className="record-image-error">正在加载图片…</small>;
+}
+
+````
+
+## src/components/RecordPhotoAction.tsx
+
+<!-- source: src/components/RecordPhotoAction.tsx sha256: 682d40b1f6c6e7f7b32d651176a7efcb67985a9aaacf210acb697ebfa4ac8e07 encoding: utf8 -->
+````tsx
+import { createContext, useState } from "react";
+import { ImagePlus } from "lucide-react";
+import type { LifeRecord } from "../types";
+
+export const RecordPhotoContext = createContext<{ onAttach: (record: LifeRecord, file: File) => Promise<void>; onDetach: (record: LifeRecord) => Promise<void> } | null>(null);
+
+export function RecordPhotoAction({ record, isDemo, onAttach, onDetach }: { record: LifeRecord; isDemo: boolean; onAttach: (record: LifeRecord, file: File) => Promise<void>; onDetach: (record: LifeRecord) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function run(task: () => Promise<void>) {
+    setBusy(true); setError("");
+    try { await task(); } catch (failure) { setError(failure instanceof Error ? failure.message : "图片操作失败。"); }
+    finally { setBusy(false); }
+  }
+  if (isDemo) return null;
+  return <div className="record-photo-actions"><label className="record-control-button file-picker"><ImagePlus size={15} />{busy ? "处理中…" : record.image_path ? "更换图片" : "添加图片"}<input className="file-input-accessible" aria-label={`${record.image_path ? "更换" : "添加"}${record.content}的图片`} type="file" accept="image/jpeg,image/png,image/webp,image/heic" disabled={busy} onChange={event => { const file=event.target.files?.[0]; if (file) void run(() => onAttach(record, file)); event.target.value=""; }} /></label>{record.image_path && <button type="button" className="record-control-button" disabled={busy} onClick={() => void run(() => onDetach(record))}>移除图片关联</button>}<small>单张不超过 10 MB；上传需联网，移除关联不会删除存储原图。</small>{error && <p className="field-error" role="alert">{error}</p>}</div>;
 }
 
 ````
@@ -1334,7 +1566,7 @@ export function ScheduleDaySection({ day, trip, entries, isDemo, onAdd, onSave, 
 
 ## src/components/SettingsPanel.tsx
 
-<!-- source: src/components/SettingsPanel.tsx sha256: cc4164480417274c2228d2251380da0cf23bd9567534003d637d2235696982ac encoding: utf8 -->
+<!-- source: src/components/SettingsPanel.tsx sha256: 0f08661f2780fdd4be9b576a195064c6d3509788d639dd944c1f3d4c20208591 encoding: utf8 -->
 ````tsx
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Bell, BookOpen, Bot, Check, ChevronRight, Cloud, HeartHandshake, History, ImagePlus, KeyRound, LoaderCircle, LogOut, Mail, Moon, Palette, Pencil, RefreshCcw, Search, ShieldCheck, Smartphone, Sparkles, Sun, Users, WalletCards, X } from "lucide-react";
@@ -1399,7 +1631,7 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, sum
 
   return (
     <section className="settings-page">
-      <div className="section-hero"><div><p className="eyebrow">设置</p><h1>让记录更像你。</h1><p>选择常用币种和显示方式，数据会跟随你的账号。</p></div></div>
+      <div className="section-hero"><div><h1>设置</h1><p>管理账号、偏好与数据。</p></div></div>
       <div className="settings-layout">
         <div className="settings-main">
           <section className="settings-card glass-card">
@@ -1732,10 +1964,10 @@ export function SyncStatusDialog({ items, aiCopies, online, cloudReady, isDemo, 
 
 ## src/components/Timeline.tsx
 
-<!-- source: src/components/Timeline.tsx sha256: 5acf38bf423e3cb8c9de4a1271304be990859d157ee10a8eaa42c5d72fa9a672 encoding: utf8 -->
+<!-- source: src/components/Timeline.tsx sha256: 758ee9662906be39b4074531c4ff918a662612d1d18d8500019ec4e7f660c573 encoding: utf8 -->
 ````tsx
 import { useState } from "react";
-import { CalendarClock, Check, CircleDollarSign, Clock3, MapPin, NotebookPen, Pencil, ReceiptText, RotateCcw, Route, Sparkles, X } from "lucide-react";
+import { CalendarClock, Check, CircleDollarSign, Clock3, MapPin, NotebookPen, Pencil, ReceiptText, RotateCcw, Route, X } from "lucide-react";
 import type { Currency, LifeRecord, RecordDraft, RecordType, Trip } from "../types";
 import { CATEGORY_META, formatDateTime, formatMoney } from "../types";
 import { getTransportPresentation } from "../lib/transport";
@@ -1745,6 +1977,9 @@ import { TransportPlanEditor } from "./TransportPlanEditor";
 import { flightDisplay } from "../lib/flightDisplay";
 import { normalizeScheduleDetails } from "../lib/schedules";
 import { groupTimeline, timelineDate } from "../lib/calendar";
+import { RecordActions } from "./RecordActions";
+import { RecordImage } from "./RecordImage";
+import { RecordPhotoAction } from "./RecordPhotoAction";
 
 interface Props {
   records: LifeRecord[];
@@ -1754,13 +1989,17 @@ interface Props {
   onStatus: (record: LifeRecord, status: "planned" | "completed" | "cancelled") => void;
   onSaveRecord: (draft: RecordDraft) => Promise<void>;
   onUpdateRecord: (record: LifeRecord, serverConfirmed?: boolean) => Promise<void>;
+  onEditRecord: (id: string) => void;
+  onDeleteRecord: (record: LifeRecord) => Promise<void>;
+  onAttachImage: (record: LifeRecord, file: File) => Promise<void>;
+  onDetachImage: (record: LifeRecord) => Promise<void>;
   isDemo?: boolean;
 }
 
 const icons = { expense: ReceiptText, trip: Route, note: NotebookPen };
 const labels = { expense: "消费", trip: "行程", note: "随记" };
 
-export function Timeline({ records, trips, filter, onStatus, onSaveRecord, onUpdateRecord, isDemo = false }: Props) {
+export function Timeline({ records, trips, filter, onStatus, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, onAttachImage, onDetachImage, isDemo = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingRecord = records.find((record) => record.id === editingId);
   const editingTrip = trips.find((trip) => trip.id === editingRecord?.trip_id);
@@ -1768,7 +2007,7 @@ export function Timeline({ records, trips, filter, onStatus, onSaveRecord, onUpd
   const grouped = groupTimeline(visible);
 
   if (!visible.length) {
-    return <EmptyState className="empty-timeline" icon={Sparkles} title="这里还很安静" description="从上方快速记下第一条，生活的时间线就会从这里开始。" />;
+    return <EmptyState className="empty-timeline" icon={NotebookPen} title="暂无记录" description="点击上方「记一笔」开始。" />;
   }
 
   return (
@@ -1777,7 +2016,7 @@ export function Timeline({ records, trips, filter, onStatus, onSaveRecord, onUpd
         <div className="timeline-day" key={date}>
           <div className="day-label"><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(`${date}T12:00:00`))}</span><small>{new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(`${date}T12:00:00`))}</small></div>
           <div className="day-records">
-            {items.map((record) => <RecordCard key={record.id} record={record} trip={trips.find((trip) => trip.id === record.trip_id)} onStatus={onStatus} onEdit={() => setEditingId(record.id)} />)}
+            {items.map((record) => <RecordCard key={record.id} record={record} trip={trips.find((trip) => trip.id === record.trip_id)} onStatus={onStatus} onEdit={() => setEditingId(record.id)} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} onAttachImage={onAttachImage} onDetachImage={onDetachImage} isDemo={isDemo} />)}
           </div>
         </div>
       ))}
@@ -1786,7 +2025,7 @@ export function Timeline({ records, trips, filter, onStatus, onSaveRecord, onUpd
   );
 }
 
-function RecordCard({ record, trip, onStatus, onEdit }: { record: LifeRecord; trip?: Trip; onStatus: Props["onStatus"]; onEdit: () => void }) {
+function RecordCard({ record, trip, onStatus, onEdit, onEditRecord, onDeleteRecord, onAttachImage, onDetachImage, isDemo }: { record: LifeRecord; trip?: Trip; onStatus: Props["onStatus"]; onEdit: () => void; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; onAttachImage: Props["onAttachImage"]; onDetachImage: Props["onDetachImage"]; isDemo: boolean }) {
   const Icon = icons[record.record_type];
   const presentation = getTransportPresentation(record);
   const flightView = flightDisplay(record);
@@ -1803,15 +2042,17 @@ function RecordCard({ record, trip, onStatus, onEdit }: { record: LifeRecord; tr
         <div className="record-meta"><span>{record.transport_type || schedule ? presentation.label : labels[record.record_type]}</span><i>·</i><time>{displayTime}</time>{trip && <em>{trip.name}</em>}</div>
         <h3>{presentation.title}</h3>
         {presentation.subtitle && <p>{presentation.subtitle}</p>}
+        <RecordImage path={record.image_path} ownerId={record.user_id} isDemo={isDemo} />
         <div className="record-details">
           {duration?.status === "ready" && <span><Clock3 size={14} />{flightView!.durationLabel} {duration.label}</span>}
-          {flightView?.matched && <span className="status completed"><Check size={14} />优先展示匹配信息</span>}
+          {flightView?.matched && <span className="status completed"><Check size={14} />已匹配</span>}
           {record.location && !record.transport_type && <span><MapPin size={14} />{record.location}</span>}
           {record.record_type === "expense" && record.expense_category && <span><CircleDollarSign size={14} />{CATEGORY_META[record.expense_category].label}</span>}
           {record.record_type === "trip" && record.plan_status && <span className={`status ${record.plan_status}`}><Clock3 size={14} />{{ planned: "计划中", completed: "已完成", cancelled: "已取消" }[record.plan_status]}</span>}
         </div>
       </div>
       {record.record_type === "expense" && record.amount != null && record.currency && <strong className="record-amount">{formatMoney(record.amount, record.currency)}</strong>}
+      {record.record_type !== "trip" && <RecordActions record={record} onEdit={onEditRecord} onDelete={onDeleteRecord} />}
       {record.record_type === "trip" && <div className="record-controls">
         {record.plan_status === "completed" && <span className="done-stamp"><Check size={15} />已打卡</span>}
         <div className="record-control-buttons">
@@ -1819,6 +2060,7 @@ function RecordCard({ record, trip, onStatus, onEdit }: { record: LifeRecord; tr
           {record.plan_status === "planned" && <><button className="record-control-button" onClick={() => onStatus(record, "completed")}><Check size={15} />标记完成</button><button className="record-control-button" onClick={() => onStatus(record, "cancelled")}><X size={15} />取消计划</button></>}
           {(record.plan_status === "completed" || record.plan_status === "cancelled") && <button className="record-control-button" onClick={() => onStatus(record, "planned")}><RotateCcw size={15} />{record.plan_status === "completed" ? "撤回完成" : "恢复计划"}</button>}
         </div>
+        <RecordPhotoAction record={record} isDemo={isDemo} onAttach={onAttachImage} onDetach={onDetachImage} />
       </div>}
       {record.record_type === "trip" && <span className="timeline-pin"><CalendarClock size={13} /></span>}
     </article>
@@ -2218,7 +2460,7 @@ export function SettingsRow({ icon: Icon, title, description, trailing, classNam
 
 ## src/styles.css
 
-<!-- source: src/styles.css sha256: b0ca44b557db7e8788459e9e09ebc20d9405397330ea3c8506764bde618effff encoding: utf8 -->
+<!-- source: src/styles.css sha256: 9910d964d0a24eb65cc5f18c14ac88dc9ccaf488b2b1cf0088ee8785a83e9351 encoding: utf8 -->
 ````css
 @import "tailwindcss";
 
@@ -3369,6 +3611,88 @@ textarea::placeholder { color: var(--muted); }
   .flight-current-view .transport-route-grid > svg { display: none; }
   .flight-current-view .transport-route-grid > div:last-child { text-align: left; padding-top: var(--space-3); }
   .plan-type-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* V2.1: quieter hierarchy, generous spacing and a visible sync state. */
+.home-heading { padding: 8px 2px 24px; }
+.home-heading p { color: var(--accent); font-size: 13px; font-weight: 650; margin: 0 0 10px; letter-spacing: .03em; }
+.home-heading h1 { font-size: clamp(30px, 3.6vw, 44px); line-height: 1.18; letter-spacing: -.045em; margin: 0 0 8px; overflow-wrap: anywhere; }
+.home-heading > span { color: var(--muted); font-size: 15px; }
+.current-trip { padding: 20px; gap: 16px; }
+.current-trip-icon { width: 38px; height: 38px; border-radius: 12px; color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+.current-trip div { min-width: 0; }
+.current-trip strong { font-size: 18px; overflow-wrap: anywhere; }
+.current-trip p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.55; overflow-wrap: anywhere; }
+.home-quick-grid { gap: 12px; }
+.quick-collapsed, .home-route-entry { min-height: 92px; }
+.filter-row { margin-top: 32px; }
+.timeline-day { margin-top: 8px; }
+.day-label span { font-weight: 650; }
+.record-card, .trip-card, .settings-card { border-radius: 18px; }
+.record-card { padding: 18px; }
+.login-story h1 { line-height: 1.1; }
+.login-story h1 span { color: var(--text); }
+@media (max-width: 860px) {
+  .connection { display: flex; min-width: 0; max-width: 132px; font-size: 12px; }
+  .connection svg { flex: none; }
+}
+@media (max-width: 620px) {
+  .home-heading { padding: 6px 2px 20px; }
+  .home-heading h1 { font-size: 29px; }
+  .current-trip { padding: 16px; }
+  .current-trip p { display: -webkit-box; }
+  .filter-row { margin-top: 24px; }
+  .record-card { padding: 16px; }
+  .app-brand b { white-space: nowrap; }
+  .header-actions { gap: 4px; }
+  .connection { max-width: 120px; overflow: hidden; white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* A quieter first impression: fewer labels, tighter cards, clearer actions. */
+.login-story h1 { max-width: 12em; margin: 32px 0 0; font-size: clamp(36px, 4vw, 56px); line-height: 1.2; letter-spacing: -.04em; }
+.feature-row { justify-content: flex-start; gap: 28px; margin-top: 32px; }
+.feature-row > div { display: inline-flex; gap: 8px; }
+.feature-icon { width: 24px; height: 24px; }
+.login-card-heading { margin-bottom: 24px; }
+.login-limits { background: transparent; padding: 0; margin-top: 16px; }
+.login-limits p { line-height: 1.6; }
+.demo-entry { margin-top: 20px; padding-top: 20px; }
+.privacy-note { margin-top: 16px; padding-top: 16px; font-size: 13px; color: var(--muted); }
+.home-heading { padding-bottom: 20px; }
+.home-heading h1 { margin-bottom: 0; }
+.quick-collapsed, .home-route-entry { min-height: 82px; }
+.home-route-entry:hover { border-color: var(--border-strong); }
+.quick-collapsed b, .home-route-entry b { font-size: 16px; }
+.quick-collapsed small, .home-route-entry small { font-size: 13px; }
+.section-hero h1 { margin-bottom: 0; }
+.settings-page .section-hero h1 { margin-bottom: 8px; }
+.record-editor { width: min(620px, 100%); overflow-y: auto; }
+.record-editor > label, .record-editor .form-row > label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-soft); font-size: 14px; }
+.record-editor input:not([type="file"]), .record-editor select, .record-editor textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--field-bg); color: var(--text); }
+.record-editor small, .record-image-editor small { color: var(--muted); font-size: 13px; }
+.record-image-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 14px 0; }
+.record-image-editor > small { flex-basis: 100%; line-height: 1.5; }
+.record-image-editor label { cursor: pointer; }
+.record-image { display: block; max-width: min(100%, 320px); max-height: 240px; margin-top: 12px; border-radius: var(--radius-control); object-fit: contain; }
+.record-image-error { display: block; margin-top: 8px; color: var(--muted); }
+.record-action-group { grid-column: 2; margin-top: 10px; }
+.record-action-group .record-control-buttons { justify-content: flex-start; }
+.record-photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.record-photo-actions label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.record-photo-actions small { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.file-picker { position: relative; }
+.file-input-accessible { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.file-picker:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-route-result p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+@media (max-width: 620px) {
+  .login-story h1 { margin-top: 24px; font-size: 30px; }
+  .feature-row { justify-content: center; gap: 28px; margin-top: 24px; }
+  .home-heading { padding-bottom: 18px; }
+  .quick-collapsed, .home-route-entry { min-height: 72px; }
+  .section-hero { padding-bottom: 16px; }
 }
 
 ````

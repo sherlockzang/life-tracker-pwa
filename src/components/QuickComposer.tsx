@@ -117,7 +117,7 @@ export function QuickComposer({ trips, defaultCurrency, forcedTripId, parentPlan
     return (
       <button className="quick-collapsed glass-card" onClick={() => setOpen(true)}>
         <span className="quick-plus"><Plus size={22} /></span>
-        <span><b>现在，想记下什么？</b><small>消费、行程或一个念头</small></span>
+        <span><b>记一笔</b><small>消费、行程、随记</small></span>
         <span className="quick-types"><ReceiptText /><Route /><NotebookPen /></span>
       </button>
     );

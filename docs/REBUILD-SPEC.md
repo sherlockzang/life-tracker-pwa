@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | expense | content、非负金额、币种、分类、event_at | 地点、备注、trip_id、parent_plan_id |
 | trip | content、event_at；旅程内有 plan_status | 地点、备注、trip_id、sort_order、结构化模板 |
-| note | content、event_at | 备注、trip_id、parent_plan_id；通用图片上传未实现 |
+| note | content、event_at | 备注、trip_id、parent_plan_id；V2.1 本地候选支持编辑后上传一张私有图片 |
 
 content trim 后 1–4000；只给 expense 存 amount/currency/category，其余清空。用户 ID 必须为当前会话 UUID。默认时间为设备当前时间，可修改；消费金额 0 有效，NaN/负数无效。
 
@@ -47,7 +47,7 @@ content trim 后 1–4000；只给 expense 存 amount/currency/category，其余
 
 日期分组和排序必须采用一致的定义：允许选择显示时区，但不得先按 UTC 排序，再用不同航班本地日期决定组顺序而造成 30→28→29。同组内部时间也一致。具体缺陷和期望回归见审查报告。
 
-计划卡有编辑、计划中/已完成/已取消三状态，完成可撤回，取消可恢复；修改保留 id / created_at / owner。普通已完成待办可以划线；交通和酒店作为经历记录不能把标题划掉。通用消费/随记编辑删除不是当前完整功能，勿在用户指南承诺。
+计划卡有编辑、计划中/已完成/已取消三状态，完成可撤回，取消可恢复；修改保留 id / created_at / owner。普通已完成待办可以划线；交通和酒店作为经历记录不能把标题划掉。V2.1 本地候选消费／随记支持编辑删除；删除须联网、无未处理队列、按 owner/id/updated_at 匹配；新增图片为私有存储、已上传图片不会自动删除，真实服务尚需验收。
 
 ### 2.3 旅程与计划
 
@@ -108,7 +108,7 @@ FlightDetails 合同见 DATABASE 与 types 参考：
   请求前在IndexedDB v3 automaticSummaries事务领取owner/context；失败/未知结果也留标记，时钟/刷新/前台不自动重试。跨窗口只领取一次、账号隔离、旧标记30天清理。设置可手动生成，不把设备标记当跨设备安全额度。
 - 缓存读取不确定时先停止，不浪费模型；生成后缓存/usage失败返回内容与签名恢复凭据，在原账号本地保存副本。重试保存只写数据库不再调用模型或配额，旧副本不能覆盖新缓存；超时仍可复制内容。
 - 无 key / 离线 / 超额 / 超时：明确原因、可手动继续，不能阻止基础记录。禁止开放任意 system prompt / 任意模型 / 任意目标 URL。
-- 原实现 deepseek-v4-flash / thinking disabled；未来服务更名先查供应商官方支持再换，不能假设永远可用。token 上限 route450 / expense150 / note200 / recap800 / summary300，timeout24s，结构输出验证。
+- V2.1 本地候选使用 deepseek-flash（V4.1 Flash） / thinking disabled；未来服务更名先查供应商官方支持再换，不能假设永远可用。线上模型名以已部署函数为准。token 上限 route450 / expense150 / note200 / recap800 / summary300，timeout24s，结构输出验证。
 
 ### 2.9 账号、配额、设置
 

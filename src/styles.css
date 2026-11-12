@@ -1148,3 +1148,85 @@ textarea::placeholder { color: var(--muted); }
   .flight-current-view .transport-route-grid > div:last-child { text-align: left; padding-top: var(--space-3); }
   .plan-type-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* V2.1: quieter hierarchy, generous spacing and a visible sync state. */
+.home-heading { padding: 8px 2px 24px; }
+.home-heading p { color: var(--accent); font-size: 13px; font-weight: 650; margin: 0 0 10px; letter-spacing: .03em; }
+.home-heading h1 { font-size: clamp(30px, 3.6vw, 44px); line-height: 1.18; letter-spacing: -.045em; margin: 0 0 8px; overflow-wrap: anywhere; }
+.home-heading > span { color: var(--muted); font-size: 15px; }
+.current-trip { padding: 20px; gap: 16px; }
+.current-trip-icon { width: 38px; height: 38px; border-radius: 12px; color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+.current-trip div { min-width: 0; }
+.current-trip strong { font-size: 18px; overflow-wrap: anywhere; }
+.current-trip p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.55; overflow-wrap: anywhere; }
+.home-quick-grid { gap: 12px; }
+.quick-collapsed, .home-route-entry { min-height: 92px; }
+.filter-row { margin-top: 32px; }
+.timeline-day { margin-top: 8px; }
+.day-label span { font-weight: 650; }
+.record-card, .trip-card, .settings-card { border-radius: 18px; }
+.record-card { padding: 18px; }
+.login-story h1 { line-height: 1.1; }
+.login-story h1 span { color: var(--text); }
+@media (max-width: 860px) {
+  .connection { display: flex; min-width: 0; max-width: 132px; font-size: 12px; }
+  .connection svg { flex: none; }
+}
+@media (max-width: 620px) {
+  .home-heading { padding: 6px 2px 20px; }
+  .home-heading h1 { font-size: 29px; }
+  .current-trip { padding: 16px; }
+  .current-trip p { display: -webkit-box; }
+  .filter-row { margin-top: 24px; }
+  .record-card { padding: 16px; }
+  .app-brand b { white-space: nowrap; }
+  .header-actions { gap: 4px; }
+  .connection { max-width: 120px; overflow: hidden; white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* A quieter first impression: fewer labels, tighter cards, clearer actions. */
+.login-story h1 { max-width: 12em; margin: 32px 0 0; font-size: clamp(36px, 4vw, 56px); line-height: 1.2; letter-spacing: -.04em; }
+.feature-row { justify-content: flex-start; gap: 28px; margin-top: 32px; }
+.feature-row > div { display: inline-flex; gap: 8px; }
+.feature-icon { width: 24px; height: 24px; }
+.login-card-heading { margin-bottom: 24px; }
+.login-limits { background: transparent; padding: 0; margin-top: 16px; }
+.login-limits p { line-height: 1.6; }
+.demo-entry { margin-top: 20px; padding-top: 20px; }
+.privacy-note { margin-top: 16px; padding-top: 16px; font-size: 13px; color: var(--muted); }
+.home-heading { padding-bottom: 20px; }
+.home-heading h1 { margin-bottom: 0; }
+.quick-collapsed, .home-route-entry { min-height: 82px; }
+.home-route-entry:hover { border-color: var(--border-strong); }
+.quick-collapsed b, .home-route-entry b { font-size: 16px; }
+.quick-collapsed small, .home-route-entry small { font-size: 13px; }
+.section-hero h1 { margin-bottom: 0; }
+.settings-page .section-hero h1 { margin-bottom: 8px; }
+.record-editor { width: min(620px, 100%); overflow-y: auto; }
+.record-editor > label, .record-editor .form-row > label { display: grid; gap: 6px; margin-bottom: 12px; color: var(--text-soft); font-size: 14px; }
+.record-editor input:not([type="file"]), .record-editor select, .record-editor textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--field-bg); color: var(--text); }
+.record-editor small, .record-image-editor small { color: var(--muted); font-size: 13px; }
+.record-image-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 14px 0; }
+.record-image-editor > small { flex-basis: 100%; line-height: 1.5; }
+.record-image-editor label { cursor: pointer; }
+.record-image { display: block; max-width: min(100%, 320px); max-height: 240px; margin-top: 12px; border-radius: var(--radius-control); object-fit: contain; }
+.record-image-error { display: block; margin-top: 8px; color: var(--muted); }
+.record-action-group { grid-column: 2; margin-top: 10px; }
+.record-action-group .record-control-buttons { justify-content: flex-start; }
+.record-photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.record-photo-actions label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.record-photo-actions small { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.file-picker { position: relative; }
+.file-input-accessible { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.file-picker:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-route-result p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+@media (max-width: 620px) {
+  .login-story h1 { margin-top: 24px; font-size: 30px; }
+  .feature-row { justify-content: center; gap: 28px; margin-top: 24px; }
+  .home-heading { padding-bottom: 18px; }
+  .quick-collapsed, .home-route-entry { min-height: 72px; }
+  .section-hero { padding-bottom: 16px; }
+}

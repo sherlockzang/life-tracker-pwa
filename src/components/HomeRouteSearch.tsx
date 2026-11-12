@@ -113,7 +113,7 @@ export function HomeRouteSearch({ trips, records, isDemo, onSave }: Props) {
   const selectedTrip = availableTrips.find((trip) => trip.id === tripId);
 
   return <>
-    <button className="home-route-entry glass-card" type="button" onClick={() => setOpen(true)}><span><Route size={21} /></span><div><b>AI 路线查询</b><small>不用先建行程，随时问两地之间怎么走</small></div><ArrowRight size={18} /></button>
+    <button className="home-route-entry glass-card" type="button" onClick={() => setOpen(true)}><span><Route size={21} /></span><div><b>路线查询</b><small>AI 帮你规划两地路线</small></div><ArrowRight size={18} /></button>
     {open && <div className="modal-backdrop"><section className="modal-card glass-card home-route-modal" role="dialog" aria-modal="true" aria-labelledby="home-route-title"><header><div><p className="eyebrow">快速路线</p><h2 id="home-route-title">从哪里，到哪里？</h2></div><button className="icon-button" type="button" aria-label="关闭路线查询" onClick={close}><X /></button></header>
       <form className="home-route-query" onSubmit={query}><label><span><MapPin size={14} />出发地</span><input autoFocus value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="例如 UCSB 加大圣塔芭芭拉分校" maxLength={120} required /></label><label><span><Route size={14} />目的地</span><input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="例如 洛杉矶机场" maxLength={120} required /></label><button className="primary-button" disabled={loading || !origin.trim() || !destination.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{loading ? "正在规划…" : "查询路线"}</button></form>
       {error && <p className="field-error" role="alert">{error}</p>}

@@ -20,6 +20,7 @@ import { claimAutomaticSummary, loadAutomaticSummary, saveAutomaticSummary, list
 import type { SaveResult } from "./lib/syncEngine";
 import { HomeRouteSearch } from "./components/HomeRouteSearch";
 import { SyncStatusDialog } from "./components/SyncStatusDialog";
+import { RecordEditor } from "./components/RecordEditor";
 
 const ExpenseStats = lazy(() => import("./components/ExpenseStats").then((module) => ({ default: module.ExpenseStats })));
 
@@ -52,6 +53,7 @@ export default function App() {
   const [syncItems, setSyncItems] = useState<PendingMutation[]>([]);
   const [cloudReady, setCloudReady] = useState(false);
   const [showSyncIssues, setShowSyncIssues] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const activeOwner = useRef<string | undefined>(undefined);
   const summaryRequests = useRef(new Map<string, ReturnType<typeof generateDailySummary>>());
 
@@ -192,6 +194,47 @@ export default function App() {
     } catch (error) { showToast(error instanceof Error ? error.message : "保存失败，本地副本已保留"); throw error; }
   }
 
+  async function uploadRecordImage(file: File) {
+    if (!user || demoMode || !navigator.onLine) throw new Error("图片上传需要登录并联网。");
+    if (!["image/jpeg", "image/png", "image/webp", "image/heic"].includes(file.type) || file.size > 10 * 1024 * 1024 || file.size === 0) throw new Error("请选择不超过 10 MB 的 JPEG、PNG、WebP 或 HEIC 图片。");
+    const ownerId = user.id;
+    if ((await supabase.auth.getSession()).data.session?.user.id !== ownerId) throw new Error("账号已切换，请重新登录。");
+    const path = `${ownerId}/${crypto.randomUUID()}`;
+    const { error } = await supabase.storage.from("record-images").upload(path, file, { contentType: file.type, upsert: false });
+    if (error) throw new Error("图片上传失败，请检查网络和存储权限。");
+    if (activeOwner.current !== ownerId) throw new Error("账号已切换，图片未关联到记录。");
+    return path;
+  }
+
+  async function saveEditedRecord(record: LifeRecord) {
+    if (!user || record.user_id !== user.id || activeOwner.current !== user.id) throw new Error("账号已切换，请在原账号中保存。");
+    const current = data?.records.find(item => item.id === record.id);
+    if (!current || current.updated_at !== record.updated_at) throw new Error("记录已变化，请关闭编辑并核对最新内容。");
+    const saved = demoMode ? normalizeRecord(record as unknown as Record<string, unknown>) : savedRow<LifeRecord>(await persistRecord(record, record), user.id);
+    if (activeOwner.current !== user.id) throw new Error("账号已切换，请在原账号中查看结果。");
+    updateData(currentData => ({ ...currentData, records: currentData.records.map(item => item.id === record.id ? saved : item) }));
+  }
+
+  async function attachRecordImage(record: LifeRecord, file: File) {
+    const path = await uploadRecordImage(file);
+    await saveEditedRecord({ ...record, image_path: path });
+  }
+
+  async function deleteRecord(record: LifeRecord) {
+    if (!user || record.user_id !== user.id || record.record_type === "trip") throw new Error("无法删除此记录。");
+    if (demoMode) { updateData(current => ({ ...current, records: current.records.filter(item => item.id !== record.id) })); return; }
+    if (!navigator.onLine) throw new Error("删除需要联网，请先同步记录。");
+    const ownerId = user.id;
+    if ((await listMutations(ownerId)).some(item => item.table === "records" && item.entityId === record.id && !item.supersededBy)) throw new Error("这条记录还有待处理的同步内容，请先处理后再删除。");
+    if ((await supabase.auth.getSession()).data.session?.user.id !== ownerId) throw new Error("账号已切换。");
+    const { data: deleted, error } = await supabase.from("records").delete().eq("id", record.id).eq("user_id", ownerId).eq("updated_at", record.updated_at).select("id");
+    if (error) throw new Error("删除未确认，请刷新并检查网络后重试。");
+    if (!deleted?.length) throw new Error("记录可能已更改或删除，请刷新后核对。");
+    if (activeOwner.current !== ownerId) return;
+    updateData(current => ({ ...current, records: current.records.filter(item => item.id !== record.id) }));
+    showToast(record.image_path ? "记录已删除；关联图片仍保留在私有存储中" : "记录已删除");
+  }
+
   async function saveTrip(draft: TripDraft) {
     if (!user) throw new Error("尚未登录");
     const trip = makeTrip(user, draft);
@@ -305,25 +348,27 @@ export default function App() {
       <main className="app-main">
         {view === "timeline" && (
           <>
-            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>你正在进行</small><strong>{currentTrip.name} · Day {currentDay}</strong><p>{dailySummary || `${currentTrip.destination}，今天也去留下一点什么吧。`}</p></div><ChevronRight /></button>}
-            {currentTrip && !demoMode && !dailySummary && <p className="field-help">今日摘要在此设备自动尝试一次；若未生成，可在设置中手动生成。</p>}
+            <section className="home-heading" aria-label="今日概览"><p>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(clockNow)}</p><h1>你好，{data.profile.display_name || "朋友"}</h1></section>
+            {currentTrip && <button className="current-trip glass-card" onClick={() => { setPlannerTripId(currentTrip.id); setView("planner"); }}><span className="current-trip-icon"><Plane size={19} /></span><div><small>进行中的行程 · 第 {currentDay} 天</small><strong>{currentTrip.name}</strong><p>{dailySummary || `${currentTrip.destination} · ${currentTrip.start_date} — ${currentTrip.end_date}`}</p></div><ChevronRight /></button>}
+            {currentTrip && !demoMode && !dailySummary && <p className="field-help">今日摘要未生成，可在设置中重试。</p>}
             <div className="home-quick-grid"><QuickComposer trips={data.trips} isDemo={demoMode} defaultCurrency={data.settings.base_currency} onSave={saveRecord} /><HomeRouteSearch trips={data.trips} records={data.records} isDemo={demoMode} onSave={saveRecord} /></div>
             <div className="filter-row">
-              <div className="filter-tabs" role="tablist">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
+              <div className="filter-tabs" role="tablist" aria-label="记录类型">{filters.map((item) => { const Icon = item.icon; return <button role="tab" aria-selected={filter === item.value} className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)} key={item.value}><Icon size={15} />{item.label}<span>{item.value === "all" ? data.records.filter((record) => !record.parent_plan_id).length : data.records.filter((record) => record.record_type === item.value && !record.parent_plan_id).length}</span></button>; })}</div>
               <button className="planner-link" onClick={() => setView("planner")}><MapPinned size={16} />行程规划<ChevronRight size={15} /></button>
             </div>
             {filter === "expense" && <Suspense fallback={<div className="chart-loading glass-card"><LoaderCircle className="spin" />正在整理消费统计…</div>}><ExpenseStats records={data.records} rates={data.rates} baseCurrency={data.settings.base_currency} refreshing={refreshingRates} onRefresh={handleRateRefresh} /></Suspense>}
-            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} isDemo={demoMode} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() }).catch(() => undefined)} />
+            <Timeline records={data.records} trips={data.trips} filter={filter} baseCurrency={data.settings.base_currency} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} onEditRecord={setEditingRecordId} onDeleteRecord={deleteRecord} onAttachImage={attachRecordImage} onDetachImage={record => saveEditedRecord({ ...record, image_path: null })} isDemo={demoMode} onStatus={(record, status) => void updateRecord({ ...record, plan_status: status, updated_at: new Date().toISOString() }).catch(() => undefined)} />
           </>
         )}
-        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} />}
+        {view === "planner" && <Planner key={plannerTripId || "all"} trips={data.trips} records={data.records} initialTripId={plannerTripId} baseCurrency={data.settings.base_currency} isDemo={demoMode} onSaveTrip={saveTrip} onUpdateTrip={updateTrip} onSaveRecord={saveRecord} onUpdateRecord={updateRecord} onEditRecord={setEditingRecordId} onDeleteRecord={deleteRecord} onAttachImage={attachRecordImage} onDetachImage={record => saveEditedRecord({ ...record, image_path: null })} />}
         {view === "settings" && <SettingsPanel user={user} settings={data.settings} profile={data.profile} changelogs={data.changelogs} online={online} isDemo={demoMode} summaryContext={summaryContext} onUpdate={(settings) => void updateSettings(settings)} onUpdateProfile={(profile, avatar) => updateProfile(profile, avatar)} onResetDemo={() => { const next = resetDemoData(); setData(next); showToast("演示数据已重置"); }} onSignOut={() => { if (demoMode) { localStorage.removeItem("life-tracker-demo-active"); setDemoMode(false); setData(null); } else void supabase.auth.signOut(); }} />}
       </main>
 
       <button className="floating-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus size={25} /></button>
+      {editingRecordId && data.records.find(item => item.id === editingRecordId) && <RecordEditor key={editingRecordId} record={data.records.find(item => item.id === editingRecordId)!} trips={data.trips} isDemo={demoMode} onClose={() => setEditingRecordId(null)} onSave={saveEditedRecord} onUpload={uploadRecordImage} />}
       {composerOpen && <div className="composer-modal"><div className="composer-modal-inner"><QuickComposer compact isDemo={demoMode} trips={data.trips} defaultCurrency={data.settings.base_currency} onSave={saveRecord} onClose={() => setComposerOpen(false)} /></div></div>}
 
-      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}><Sparkles /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
+      <nav className="mobile-nav" aria-label="移动端导航"><button className={view === "timeline" && filter !== "expense" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("all"); }}><ListFilter /><span>记录</span></button><button className={view === "planner" ? "active" : ""} onClick={() => setView("planner")}><Route /><span>行程</span></button><button className="mobile-add" aria-label="快速记录" onClick={() => setComposerOpen(true)}><Plus /></button><button className={filter === "expense" && view === "timeline" ? "active" : ""} onClick={() => { setView("timeline"); setFilter("expense"); }}><ReceiptText /><span>消费</span></button><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><CircleUserRound /><span>我的</span></button></nav>
 
       {toast && <div className="toast" role="status" aria-live="polite"><Sparkles size={15} />{toast}</div>}
       {showSyncIssues && <SyncStatusDialog key={user.id} items={ownerSyncItems} aiCopies={aiCopies} online={online} cloudReady={cloudReady} isDemo={demoMode} onClose={() => setShowSyncIssues(false)} onResolved={async () => { const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetrySave={async () => { if (!user) return; await retryFailedMutations(user.id); await syncOutbox(user.id); const fresh = await fetchAppData(user); if (activeOwner.current === user.id) { setData(fresh); setCloudReady(true); } }} onRetryAi={async () => { if (!user) return; const result = await retryAiPersistence(user.id); if (activeOwner.current !== user.id) return; if (result.errors.length) throw new Error(result.errors.join("；")); showToast(`${result.saved} 份 AI 结果已保存，没有重新调用 AI`); }} />}

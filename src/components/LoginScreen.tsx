@@ -50,25 +50,24 @@ export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> 
       <section className="login-layout">
         <div className="login-story">
           <div className="brand-mark"><BrandLogo className="login-brand-logo" /> Life Tracker</div>
-          <h1>把生活的片段，<br /><span>好好收在一起。</span></h1>
-          <p>旅行足迹、每一笔消费和突然闪过的念头，都能在几秒内记下。</p>
+          <h1>生活记录，<br /><span>行程规划。</span></h1>
           <div className="feature-row">
-            <div><span className="feature-icon coral"><ReceiptText size={19} /></span><b>消费</b><small>金额与分类统计</small></div>
-            <div><span className="feature-icon blue"><MapPinned size={19} /></span><b>行程</b><small>计划与实际打通</small></div>
-            <div><span className="feature-icon violet"><NotebookPen size={19} /></span><b>随记</b><small>留住日常瞬间</small></div>
+            <div><span className="feature-icon coral"><ReceiptText size={19} /></span><b>消费</b></div>
+            <div><span className="feature-icon blue"><MapPinned size={19} /></span><b>行程</b></div>
+            <div><span className="feature-icon violet"><NotebookPen size={19} /></span><b>随记</b></div>
           </div>
         </div>
 
         <div className="glass-card login-card">
           <div className="login-card-heading">
             <span className="mail-badge"><Mail size={22} /></span>
-            <div><h2>登录你的记录空间</h2><p>无需密码，输入邮件验证码即可登录。</p></div>
+            <div><h2>邮箱登录</h2><p>使用邮箱验证码，无需密码。</p></div>
           </div>
           {status === "code" || status === "verifying" ? (
             <div className="sent-state">
               <span className="success-ring"><KeyRound size={28} /></span>
               <h3>验证码已发送</h3>
-              <p>请输入发送到 <strong>{email}</strong> 的 6 位数字验证码。无需点击链接，也不会跳转到 Safari。</p>
+              <p>输入发送至 <strong>{email}</strong> 的 6 位验证码。</p>
               <form className="otp-form" onSubmit={verifyCode}>
                 <label htmlFor="otp-code">邮箱验证码</label>
                 <input id="otp-code" className="otp-code-input" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} autoFocus value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" aria-invalid={Boolean(error)} required />
@@ -85,12 +84,12 @@ export function LoginScreen({ onStartDemo }: { onStartDemo: () => Promise<void> 
               <button className="primary-button full" disabled={status === "sending"}>
                 {status === "sending" ? "正在发送…" : "发送邮箱验证码"}<ArrowRight size={18} />
               </button>
-              <p className="form-hint">首次使用会自动创建账号，无需单独注册。</p>
-              <div className="login-limits"><Sparkles size={15} /><p>普通账号：航班实际信息每天 2 次，路线查询、记账识别与随记润色每天共用 15 次。朋友邀请码可在登录后于设置中兑换，记录与手动规划不受额度限制。</p></div>
+              <p className="form-hint">首次登录将自动创建账号。</p>
+              <div className="login-limits"><Sparkles size={15} /><p>普通账号每天可查航班 2 次，AI 功能共 15 次。邀请码可在登录后的设置中兑换；手动记录不限次数。</p></div>
             </form>
           )}
-          <div className="demo-entry"><span>或者先看看完整功能</span><button className="secondary-button full" disabled={demoLoading} onClick={async () => { setDemoLoading(true); setError(""); try { await onStartDemo(); } catch (demoError) { setError(demoError instanceof Error ? demoError.message : "暂时无法进入演示模式"); } finally { setDemoLoading(false); } }}><FlaskConical size={17} />{demoLoading ? "正在准备演示…" : "进入演示模式"}</button><small>无需邮箱。数据只保存在当前设备；航班使用模拟信息，AI 每台设备每天可体验 2 次。</small></div>
-          <div className="privacy-note"><ShieldCheck size={17} /><span>登录后，你将拥有完全独立的账号与数据空间——你的记录只有你自己能看到，不会与其他用户共享。</span></div>
+          <div className="demo-entry"><button className="secondary-button full" disabled={demoLoading} onClick={async () => { setDemoLoading(true); setError(""); try { await onStartDemo(); } catch (demoError) { setError(demoError instanceof Error ? demoError.message : "暂时无法进入演示模式"); } finally { setDemoLoading(false); } }}><FlaskConical size={17} />{demoLoading ? "正在准备演示…" : "试用演示模式"}</button><small>演示数据保存在本机；航班为模拟信息，AI 每台设备每天 2 次。</small></div>
+          <div className="privacy-note"><ShieldCheck size={17} /><span>账号数据相互隔离，不与其他用户共享。</span></div>
         </div>
       </section>
       <footer className="app-footer">© 2026 Sherlock Zang.</footer>

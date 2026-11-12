@@ -49,7 +49,7 @@ route两条路径均由服务端接受：单独非空query，或完整非空orig
 
 真实账号可传`expectedOwner:UUID`作为账号切换防线；它不授身份，服务端仍以JWT为准，不一致409且不预留额度。成功`data:{action,cached?,result,generatedAt?,skipped?,persisted?,warning?,recoveryToken?,contextKey?}`；缓存优先返回不再预留。所有AI回填由用户决定。演示回顾为预置/模拟，不调用模型；演示今日摘要不调用；轻量动作可调用真实DeepSeek。
 
-上游 POST https://api.deepseek.com/chat/completions，key来自DEEPSEEK_API_KEY；当前model deepseek-v4-flash，thinking disabled，streamfalse；temperature recap0.5/其余0.2，max_tokens450/150/200/800/300；解析消费启用JSON格式并二次验证。服务端24s硬超时覆盖响应头和JSON body读取，不在拿到响应头后撤销deadline；忽略abort的mock传输也会结算超时。无效JSON或null/原始值等错误包络返回既有不可用错误，不直接TypeError。网络错误进入日志前只保留通用消息，不附秘密URL或Authorization。模型可用性需供应商确认，文档不是对未来型号的保证。
+上游 POST https://api.deepseek.com/chat/completions，key来自DEEPSEEK_API_KEY；V2.1 本地候选 model 为 deepseek-flash（V4.1 Flash），thinking disabled，stream false；temperature recap0.5/其余0.2，max_tokens450/150/200/800/300；解析消费启用JSON格式并二次验证。线上配置需以实际部署版本为准。服务端24s硬超时覆盖响应头和JSON body读取，不在拿到响应头后撤销deadline；忽略abort的mock传输也会结算超时。无效JSON或null/原始值等错误包络返回既有不可用错误，不直接TypeError。网络错误进入日志前只保留通用消息，不附秘密URL或Authorization。模型可用性需供应商确认，文档不是对未来型号的保证。
 
 服务端recap读取本人records与trip，不信任客户端聚合。分类按币种分别合计，不混加或猜换汇。缓存唯一user/trip，显式重新生成才消耗；snapshotHash记录来源，当前不自动判定回顾缓存过期。每日摘要contextKey由服务端活跃trip的id/当地日期/timezone排序后SHA256生成，唯一user/context；summary_date仅为上海报告锚。上海午夜而旅程当地日未变不重新生成。新增/修改当天计划不会自动invalidate已经生成的同上下文摘要，属于快照而非实时规划。
 

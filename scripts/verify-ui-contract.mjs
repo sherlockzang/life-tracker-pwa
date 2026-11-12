@@ -72,7 +72,7 @@ for (const field of ["dependencies", "devDependencies"]) {
     assert.equal(major(current[field][name]), major(prior[field][name]), `Unreviewed dependency major upgrade: ${name}`);
   }
 }
-assert.equal(current.version, "2.0.0");
+assert.equal(current.version, "2.1.0");
 assert.ok(after("src/components/SettingsPanel.tsx").includes("Built with the help of Codex, with special thanks to Claude for prompt design and development support."));
 assert.equal(after("src/styles/tokens.css").match(/--accent:\s*([^;]+);/)[1].toLowerCase(), "#0a84ff");
 for (const path of ["src/styles.css", "src/components/ExpenseStats.tsx"]) assert.ok(!/#[\da-f]{3,8}\b/i.test(after(path)), `Uncentralized visual color: ${path}`);

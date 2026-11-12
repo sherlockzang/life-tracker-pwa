@@ -295,6 +295,8 @@ assert.equal((await request({action:"expense_parse",text:"午饭十美元"})).bo
 upstreamMode="normal";
 // F07: both documented route inputs work; malformed partial inputs cost nothing.
 for(const body of [{query:"从UCSB去LAX怎么走"},{origin:"UCSB",destination:"LAX"},{origin:"UCSB",destination:"LAX",query:"公共交通路线"}]) assert.equal((await request({action:"route",...body})).status,200);
+assert.equal(lastRequestBody.model,"deepseek-flash", "Use the official V4.1 Flash API model name");
+assert.equal(lastRequestBody.thinking?.type,"disabled", "Preserve non-thinking mode and existing output limits");
 for(const body of [{},{origin:"UCSB"},{destination:"LAX",query:"怎么走"},{query:"x".repeat(501)},{origin:"x".repeat(121),destination:"LAX"},{query:"怎么走",departureTime:"x".repeat(81)}]) {
   const before={upstreamCalls,quotaCalls};assert.equal((await request({action:"route",...body})).status,400);assert.deepEqual({upstreamCalls,quotaCalls},before);
 }

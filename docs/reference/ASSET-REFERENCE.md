@@ -1,8 +1,8 @@
 # 正式图标二进制精确参考
 
-快照：2026-11-12，V2.0.0本地修复候选工作树，未部署。由build-documentation-reference.mjs机械生成；每块保存原始字节和SHA256。
+快照：2026-11-12，V2.1.0 本地候选工作树，未声明部署。由 build-documentation-reference.mjs 机械生成；每块保存原始字节和 SHA256。
 
-先读[最新验收](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
+先读[验收记录](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL 含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
 
 ## public/apple-touch-icon-v112.png
 

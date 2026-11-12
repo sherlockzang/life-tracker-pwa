@@ -61,7 +61,7 @@ export function SettingsPanel({ user, settings, profile, changelogs, online, sum
 
   return (
     <section className="settings-page">
-      <div className="section-hero"><div><p className="eyebrow">设置</p><h1>让记录更像你。</h1><p>选择常用币种和显示方式，数据会跟随你的账号。</p></div></div>
+      <div className="section-hero"><div><h1>设置</h1><p>管理账号、偏好与数据。</p></div></div>
       <div className="settings-layout">
         <div className="settings-main">
           <section className="settings-card glass-card">

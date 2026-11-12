@@ -1,8 +1,8 @@
 # 完整有序数据库迁移精确参考
 
-快照：2026-11-12，V2.0.0本地修复候选工作树，未部署。由build-documentation-reference.mjs机械生成；每块保存原始字节和SHA256。
+快照：2026-11-12，V2.1.0 本地候选工作树，未声明部署。由 build-documentation-reference.mjs 机械生成；每块保存原始字节和 SHA256。
 
-先读[最新验收](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
+先读[验收记录](../ACCEPTANCE-2026-10-01.md)、[重建规范](../REBUILD-SPEC.md)和[恢复流程](../DEPLOYMENT-ROLLBACK.md)。这是代码快照，不保证所有发布门禁已完成。SQL 含历史身份种子，新项目先安全替换。包中无云端历史数据、用户上传图片或服务私钥。
 
 ## supabase/migrations/20260714000000_initial_schema.sql
 
@@ -2193,5 +2193,23 @@ where bucket_key ~ ':[0-9]{4}-[0-9]{2}$';
 update public.api_quota_buckets
 set period_end = (date_trunc('day', period_start at time zone 'Asia/Shanghai') + interval '1 day') at time zone 'Asia/Shanghai'
 where bucket_key ~ ':[0-9]{4}-[0-9]{2}-[0-9]{2}$';
+
+````
+
+## supabase/migrations/20261112050946_harden_profile_trigger.sql
+
+<!-- source: supabase/migrations/20261112050946_harden_profile_trigger.sql sha256: eeba60e89ecac5c7bf0662b3e2eb5702b0397e777a863f2ac021407c65b7cd3e encoding: utf8 -->
+````sql
+-- Limit direct client execution; the auth.users trigger remains in place.
+revoke execute on function public.handle_new_user_profile() from public, anon, authenticated;
+
+````
+
+## supabase/migrations/20261112050955_record_image_ownership.sql
+
+<!-- source: supabase/migrations/20261112050955_record_image_ownership.sql sha256: e0e9474380973e365b4d5ce51fdb279bf6b9c87155aaca3f4f532eb05787fe0c encoding: utf8 -->
+````sql
+-- The private bucket's per-user RLS policies remain unchanged.
+alter table public.records drop constraint if exists records_image_note_only;
 
 ````

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useContext, useMemo, useState, type FormEvent } from "react";
 import { DndContext, PointerSensor, TouchSensor, closestCenter, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -9,6 +9,9 @@ import { dateInZone, zonedDateTimeToIso } from "../lib/tripDates";
 import { getTransportPresentation } from "../lib/transport";
 import { detectTimeZone, TIMEZONE_OPTIONS, timeZoneLabel } from "../lib/timezones";
 import { QuickComposer } from "./QuickComposer";
+import { RecordActions } from "./RecordActions";
+import { RecordImage } from "./RecordImage";
+import { RecordPhotoAction, RecordPhotoContext } from "./RecordPhotoAction";
 import { TransportDetailsPanel, TransportPlanEditor, type PlanKind } from "./TransportPlanEditor";
 import { generateTripRecap } from "../lib/ai";
 import { flightMoveOffset, flightTripPlacement } from "../lib/flightTripPlacement";
@@ -26,6 +29,10 @@ interface Props {
   onUpdateTrip: (trip: Trip) => Promise<void>;
   onSaveRecord: (draft: RecordDraft) => Promise<void>;
   onUpdateRecord: (record: LifeRecord, serverConfirmed?: boolean) => Promise<void>;
+  onEditRecord: (id: string) => void;
+  onDeleteRecord: (record: LifeRecord) => Promise<void>;
+  onAttachImage: (record: LifeRecord, file: File) => Promise<void>;
+  onDetachImage: (record: LifeRecord) => Promise<void>;
   initialTripId?: string;
   baseCurrency: Currency;
   isDemo?: boolean;
@@ -70,7 +77,7 @@ function orderedTrips(trips: Trip[]) {
   });
 }
 
-export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord, onUpdateRecord, initialTripId, baseCurrency, isDemo = false }: Props) {
+export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, onAttachImage, onDetachImage, initialTripId, baseCurrency, isDemo = false }: Props) {
   const [selectedId, setSelectedId] = useState(initialTripId || "");
   const [showCreate, setShowCreate] = useState(false);
   const selected = trips.find((trip) => trip.id === selectedId);
@@ -78,7 +85,7 @@ export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord
   if (!selected) {
     return (
       <section className="planner-home">
-        <div className="section-hero"><div><p className="eyebrow">行程规划</p><h1>先把期待，排进日历。</h1><p>按天安排地点与事项，出发后直接打卡，还能把实际消费和随记挂在计划下面。</p></div><button className="primary-button" onClick={() => setShowCreate(true)}><Plus size={17} />创建行程</button></div>
+        <div className="section-hero"><div><h1>行程</h1></div><button className="primary-button" onClick={() => setShowCreate(true)}><Plus size={17} />创建行程</button></div>
         {showCreate && <TripForm onClose={() => setShowCreate(false)} onSave={async (draft) => { const trip = await onSaveTrip(draft); setSelectedId(trip.id); setShowCreate(false); }} />}
         <div className="trip-grid">
           {orderedTrips(trips).map((trip) => {
@@ -86,14 +93,14 @@ export function Planner({ trips, records, onSaveTrip, onUpdateTrip, onSaveRecord
             const completed = records.filter((record) => record.trip_id === trip.id && record.record_type === "trip" && record.plan_status === "completed").length;
             return <button className="trip-card glass-card" onClick={() => setSelectedId(trip.id)} key={trip.id}><span className="trip-card-icon"><Route /></span><div><p>{trip.destination}</p><h3>{trip.name}</h3><span><CalendarDays size={14} />{trip.start_date.replaceAll("-", ".")} — {trip.end_date.replaceAll("-", ".")}</span></div><div className="trip-progress"><b>{completed}/{planCount || 0}</b><small>已完成</small></div><ChevronRight /></button>;
           })}
-          {!trips.length && <div className="empty-planner glass-card"><span><Route /></span><h3>还没有行程</h3><p>创建下一次出发，把机票、酒店和想去的地方提前放进来。</p><button className="secondary-button" onClick={() => setShowCreate(true)}>创建第一个行程</button></div>}
+          {!trips.length && <div className="empty-planner glass-card"><span><Route /></span><h3>还没有行程</h3><p>添加目的地、交通和住宿。</p><button className="secondary-button" onClick={() => setShowCreate(true)}>创建行程</button></div>}
         </div>
       </section>
     );
   }
 
   if (!validTimeZone(selected.timezone)) return <section className="planner-home"><h2>请先修正这段行程的时区</h2><p>旧记录不会删除。选择标准时区后即可重新查看日期规划。</p><TripForm trip={selected} onClose={() => setSelectedId("")} onSave={async draft => { await onUpdateTrip({ ...selected, ...draft, updated_at: new Date().toISOString() }); }} /></section>;
-  return <TripBoard trip={selected} records={records} onBack={() => setSelectedId("")} onUpdateTrip={onUpdateTrip} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} baseCurrency={baseCurrency} isDemo={isDemo} />;
+  return <RecordPhotoContext.Provider value={{ onAttach: onAttachImage, onDetach: onDetachImage }}><TripBoard trip={selected} records={records} onBack={() => setSelectedId("")} onUpdateTrip={onUpdateTrip} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} baseCurrency={baseCurrency} isDemo={isDemo} /></RecordPhotoContext.Provider>;
 }
 
 function TripForm({ trip, records = [], onSave, onClose }: { trip?: Trip; records?: LifeRecord[]; onSave: (draft: TripDraft) => Promise<void>; onClose: () => void }) {
@@ -120,7 +127,7 @@ function TripForm({ trip, records = [], onSave, onClose }: { trip?: Trip; record
   return <div className="modal-backdrop"><form className="modal-card glass-card trip-form" onSubmit={submit}><header><div><p className="eyebrow">{trip ? "编辑行程" : "新行程"}</p><h2>{trip ? "调整这段旅程" : "下一站去哪里？"}</h2></div><button type="button" className="icon-button" aria-label="关闭行程编辑" onClick={onClose}><X /></button></header><label>行程名称<input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：悉尼夏日漫游" required /></label><label>目的地<input value={draft.destination} onChange={(event) => updateDestination(event.target.value)} placeholder="城市或国家" required /></label><div className="form-row"><label>开始日期<input type="date" value={draft.start_date} onChange={(event) => setDraft({ ...draft, start_date: event.target.value, end_date: event.target.value > draft.end_date ? event.target.value : draft.end_date })} required /></label><label>结束日期<input type="date" min={draft.start_date} value={draft.end_date} onChange={(event) => setDraft({ ...draft, end_date: event.target.value })} required /></label></div><label>行程时区<select value={draft.timezone} onChange={(event) => { setDraft({ ...draft, timezone: event.target.value }); setTimezoneMode("manual"); }} required>{TIMEZONE_OPTIONS.map((timezone) => <option value={timezone} key={timezone}>{timeZoneLabel(timezone)}</option>)}</select><span className="field-help">{timezoneMode === "detected" ? "已根据目的地自动匹配，可手动调整" : timezoneMode === "manual" ? "已选择标准 IANA 时区" : "输入目的地后自动匹配；当前暂用设备时区"}</span></label>{saveError && <p className="field-error">{saveError}</p>}<footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving}>{saving ? "保存中…" : trip ? "保存行程" : "创建行程"}</button></footer></form></div>;
 }
 
-function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdateRecord, baseCurrency, isDemo }: { trip: Trip; records: LifeRecord[]; onBack: () => void; onUpdateTrip: Props["onUpdateTrip"]; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; baseCurrency: Currency; isDemo: boolean }) {
+function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, baseCurrency, isDemo }: { trip: Trip; records: LifeRecord[]; onBack: () => void; onUpdateTrip: Props["onUpdateTrip"]; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; baseCurrency: Currency; isDemo: boolean }) {
   const [addingDay, setAddingDay] = useState<string | null>(null);
   const [addingKind, setAddingKind] = useState<PlanKind>("general");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -190,7 +197,7 @@ function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdate
         <div className="day-board">
           {days.map((day, index) => {
             const items = plans.filter((item) => !item.schedule_details && planDate(item, trip) === day).sort(chronological);
-            return <DayColumn key={day} day={day} dayNumber={index + 1} items={items} scheduleEntries={scheduleDayEntries(plans, day)} records={records} expanded={expanded} onExpand={setExpanded} onAdd={() => { setAddingKind("general"); setAddingDay(day); }} onAddSchedule={() => { setAddingKind("all_day"); setAddingDay(day); }} addingKind={addingKind} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} trip={trip} adding={addingDay === day} onCloseAdd={() => setAddingDay(null)} baseCurrency={baseCurrency} isDemo={isDemo} />;
+            return <DayColumn key={day} day={day} dayNumber={index + 1} items={items} scheduleEntries={scheduleDayEntries(plans, day)} records={records} expanded={expanded} onExpand={setExpanded} onAdd={() => { setAddingKind("general"); setAddingDay(day); }} onAddSchedule={() => { setAddingKind("all_day"); setAddingDay(day); }} addingKind={addingKind} onSaveRecord={onSaveRecord} onUpdateRecord={onUpdateRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} trip={trip} adding={addingDay === day} onCloseAdd={() => setAddingDay(null)} baseCurrency={baseCurrency} isDemo={isDemo} />;
           })}
         </div>
       </DndContext>
@@ -201,12 +208,13 @@ function TripBoard({ trip, records, onBack, onUpdateTrip, onSaveRecord, onUpdate
   );
 }
 
-function DayColumn({ day, dayNumber, items, scheduleEntries, records, expanded, onExpand, onAdd, onAddSchedule, addingKind, onSaveRecord, onUpdateRecord, trip, adding, onCloseAdd, baseCurrency, isDemo }: { day: string; dayNumber: number; items: LifeRecord[]; scheduleEntries: ScheduleDayEntry[]; records: LifeRecord[]; expanded: string | null; onExpand: (id: string | null) => void; onAdd: () => void; onAddSchedule: () => void; addingKind: PlanKind; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; trip: Trip; adding: boolean; onCloseAdd: () => void; baseCurrency: Currency; isDemo: boolean }) {
+function DayColumn({ day, dayNumber, items, scheduleEntries, records, expanded, onExpand, onAdd, onAddSchedule, addingKind, onSaveRecord, onUpdateRecord, onEditRecord, onDeleteRecord, trip, adding, onCloseAdd, baseCurrency, isDemo }: { day: string; dayNumber: number; items: LifeRecord[]; scheduleEntries: ScheduleDayEntry[]; records: LifeRecord[]; expanded: string | null; onExpand: (id: string | null) => void; onAdd: () => void; onAddSchedule: () => void; addingKind: PlanKind; onSaveRecord: Props["onSaveRecord"]; onUpdateRecord: Props["onUpdateRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; trip: Trip; adding: boolean; onCloseAdd: () => void; baseCurrency: Currency; isDemo: boolean }) {
   const droppable = useDroppable({ id: `day:${day}` });
-  return <section ref={droppable.setNodeRef} className={`day-column ${droppable.isOver ? "drag-over" : ""}`}><header><div><strong>Day {dayNumber}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date(`${day}T12:00:00`))}</span></div><button className="icon-button" aria-label={`为 Day ${dayNumber} 添加计划`} onClick={onAdd}><Plus size={18} /></button></header>{adding && <TransportPlanEditor key={`${day}-${addingKind}`} initialKind={addingKind} day={day} trip={trip} count={items.length} isDemo={isDemo} onClose={onCloseAdd} onSave={onSaveRecord} />}<ScheduleDaySection day={day} trip={trip} entries={scheduleEntries} isDemo={isDemo} onAdd={onAddSchedule} onSave={onSaveRecord} onUpdate={onUpdateRecord} /><SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}><div className="plan-list">{items.map((item) => <SortablePlan key={item.id} item={item} actualRecords={records.filter((record) => record.parent_plan_id === item.id)} expanded={expanded === item.id} onExpand={() => onExpand(expanded === item.id ? null : item.id)} onUpdate={onUpdateRecord} onSaveRecord={onSaveRecord} trip={trip} baseCurrency={baseCurrency} isDemo={isDemo} />)}{!items.length && !adding && <button className="empty-day" onClick={onAdd}><CirclePlus size={20} /><span>{scheduleEntries.length ? "这一天还没有定时安排" : "这一天还没有安排"}</span><small>点这里添加，或把其他计划拖过来</small></button>}</div></SortableContext></section>;
+  return <section ref={droppable.setNodeRef} className={`day-column ${droppable.isOver ? "drag-over" : ""}`}><header><div><strong>Day {dayNumber}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date(`${day}T12:00:00`))}</span></div><button className="icon-button" aria-label={`为 Day ${dayNumber} 添加计划`} onClick={onAdd}><Plus size={18} /></button></header>{adding && <TransportPlanEditor key={`${day}-${addingKind}`} initialKind={addingKind} day={day} trip={trip} count={items.length} isDemo={isDemo} onClose={onCloseAdd} onSave={onSaveRecord} />}<ScheduleDaySection day={day} trip={trip} entries={scheduleEntries} isDemo={isDemo} onAdd={onAddSchedule} onSave={onSaveRecord} onUpdate={onUpdateRecord} /><SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}><div className="plan-list">{items.map((item) => <SortablePlan key={item.id} item={item} actualRecords={records.filter((record) => record.parent_plan_id === item.id)} expanded={expanded === item.id} onExpand={() => onExpand(expanded === item.id ? null : item.id)} onUpdate={onUpdateRecord} onSaveRecord={onSaveRecord} onEditRecord={onEditRecord} onDeleteRecord={onDeleteRecord} trip={trip} baseCurrency={baseCurrency} isDemo={isDemo} />)}{!items.length && !adding && <button className="empty-day" onClick={onAdd}><CirclePlus size={20} /><span>{scheduleEntries.length ? "这一天还没有定时安排" : "这一天还没有安排"}</span><small>点这里添加，或把其他计划拖过来</small></button>}</div></SortableContext></section>;
 }
 
-function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSaveRecord, trip, baseCurrency, isDemo }: { item: LifeRecord; actualRecords: LifeRecord[]; expanded: boolean; onExpand: () => void; onUpdate: Props["onUpdateRecord"]; onSaveRecord: Props["onSaveRecord"]; trip: Trip; baseCurrency: Currency; isDemo: boolean }) {
+function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSaveRecord, onEditRecord, onDeleteRecord, trip, baseCurrency, isDemo }: { item: LifeRecord; actualRecords: LifeRecord[]; expanded: boolean; onExpand: () => void; onUpdate: Props["onUpdateRecord"]; onSaveRecord: Props["onSaveRecord"]; onEditRecord: Props["onEditRecord"]; onDeleteRecord: Props["onDeleteRecord"]; trip: Trip; baseCurrency: Currency; isDemo: boolean }) {
+  const photo = useContext(RecordPhotoContext);
   const sortable = useSortable({ id: item.id });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
   const [actualMode, setActualMode] = useState<"standard" | "route" | null>(null);
@@ -226,8 +234,10 @@ function SortablePlan({ item, actualRecords, expanded, onExpand, onUpdate, onSav
       {flight && placement && (placement.startsBeforeTrip || placement.day !== flight.departure.date) && <p className="plan-flight-carryover">{placement.startsBeforeTrip ? "行程开始前出发，归入首日。" : "按行程时区归入本日。"}原计划当地起飞 {flight.departure.date} {flight.departure.time}（{flight.departure.iata}） → 当地到达 {flight.arrival.date} {flight.arrival.time}（{flight.arrival.iata}）</p>}
       {expanded && <div className="plan-expanded">
         <TransportDetailsPanel record={item} isDemo={isDemo} onUpdate={onUpdate} onEdit={() => setEditing(true)} />
+        <RecordImage path={item.image_path} ownerId={item.user_id} isDemo={isDemo} />
+        {photo && <RecordPhotoAction record={item} isDemo={isDemo} onAttach={photo.onAttach} onDetach={photo.onDetach} />}
         <div className="actual-heading"><span>实际发生</span><small>{actualRecords.length} 条记录</small></div>
-        {actualRecords.map((record) => <div className={`actual-row ${record.record_type}`} key={record.id}><span>{record.record_type === "expense" ? "消费" : "随记"}</span><div><b>{record.content}</b><small>{formatDateTime(record.event_at)}</small></div>{record.amount != null && record.currency && <strong>{formatMoney(record.amount, record.currency)}</strong>}</div>)}
+        {actualRecords.map((record) => <div className={`actual-row ${record.record_type}`} key={record.id}><span>{record.record_type === "expense" ? "消费" : "随记"}</span><div><b>{record.content}</b><small>{formatDateTime(record.event_at)}</small><RecordImage path={record.image_path} ownerId={record.user_id} isDemo={isDemo} /><RecordActions record={record} onEdit={onEditRecord} onDelete={onDeleteRecord} /></div>{record.amount != null && record.currency && <strong>{formatMoney(record.amount, record.currency)}</strong>}</div>)}
         {actualMode ? <QuickComposer compact isDemo={isDemo} trips={[]} defaultCurrency={baseCurrency} forcedTripId={trip.id} parentPlanId={item.id} defaultType={actualMode === "route" ? "note" : undefined} initialContent={actualMode === "route" ? "实际路线" : undefined} initialNotes={actualMode === "route" ? suggestedRoute : undefined} onSave={onSaveRecord} onClose={() => setActualMode(null)} /> : <div className="actual-actions"><button className="add-actual" onClick={() => setActualMode("standard")}><Plus size={15} />添加消费或随记</button>{item.transport_type === "metro" && <button className="add-actual route-actual" onClick={() => setActualMode("route")}><Route size={15} />补记实际路线</button>}</div>}
         <div className="plan-status-actions"><button className={item.plan_status === "planned" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "planned", updated_at: new Date().toISOString() }).catch(() => undefined)}><Clock3 size={14} />计划中</button><button className={item.plan_status === "completed" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "completed", updated_at: new Date().toISOString() }).catch(() => undefined)}><Check size={14} />已完成</button><button className={item.plan_status === "cancelled" ? "active" : ""} onClick={() => void onUpdate({ ...item, plan_status: "cancelled", updated_at: new Date().toISOString() }).catch(() => undefined)}><X size={14} />已取消</button></div>
       </div>}

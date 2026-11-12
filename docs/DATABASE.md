@@ -16,15 +16,17 @@
 | 20260714061000_release_1_3_0_demo_device_session | 演示 device_hash 唯一，重复设备保留 session ID |
 | 20260714062000_owner_entitlement_repair | 原维护者 UUID 角色修复 |
 | 20260715000000_release_1_4_1_owner_admin_and_quota | Owner 后台审计、航空总池100/非Owner80、OwnerAI无额度、头像SELECT策略 |
-| 20260930000000_release_2_0_0_ui | 本地V2版本说明及新增用户版本默认 |
-| 20260930010000_all_day_schedules | 本地V2 nullable schedule_details 与范围约束 |
-| 20261001000000_safe_client_mutations | 字段白名单、版本冲突、幂等收据与单调updated_at |
-| 20261001010000_flight_integrity | 航段版本、元数据保护、原子确认与旧Edge安全桥接 |
-| 20261001020000_ai_cache_context | 旅程当地日缓存上下文、缓存与用量原子提交 |
-| 20261001030000_atomic_quota_admission | 频率检查移入事务锁，额度数值不变 |
-| 20261002000000_audit_relations_and_periods | 父计划反向关系约束、并发SHARE锁；修正既有桶重置元数据，不重置计数 |
+| 20261111172324_release_2_0_0_ui | V2版本说明及新增用户版本默认 |
+| 20261111172339_all_day_schedules | V2 nullable schedule_details 与范围约束 |
+| 20261111172344_safe_client_mutations | 字段白名单、版本冲突、幂等收据与单调updated_at |
+| 20261111172354_flight_integrity | 航段版本、元数据保护、原子确认与旧Edge安全桥接 |
+| 20261111172402_ai_cache_context | 旅程当地日缓存上下文、缓存与用量原子提交 |
+| 20261111172411_atomic_quota_admission | 频率检查移入事务锁，额度数值不变 |
+| 20261111172418_audit_relations_and_periods | 父计划反向关系约束、并发SHARE锁；修正既有桶重置元数据，不重置计数 |
+| 20261112050946_harden_profile_trigger | 撤销客户端对资料触发器函数的直接执行权限 |
+| 20261112050955_record_image_ownership | 移除仅随记可附图的旧限制，存储桶仍为私有并受账号策略保护 |
 
-最后七个是待发布V2迁移，未在生产运行；全套17个。空项目依次执行；已有项目核对历史，仅运行未应用项。后一个同名RPC覆盖前一个，不能只取早期额度函数。2026-10-02真实临时PG18已验证17个SQL、旧数据升级、CAS/RLS及并发；Auth/Storage采用平台结构模拟，发布前仍须在测试Supabase项目集成验证。atomic_quota_admission尚未发布，本次直接修正其本地日/月运算；已发布迁移未被修改。
+目前共 19 项迁移；以上版本号按原项目生产迁移记录校准。空项目依次执行；已有项目先核对迁移历史，只运行未应用项。后一个同名 RPC 覆盖前一个，不能只取早期额度函数。临时 PostgreSQL 验收覆盖旧数据升级、CAS/RLS 及并发；Auth/Storage 采用平台结构模拟，不能代替真实项目集成验证。
 
 参考 SQL 内原项目 Owner 邮箱哈希及邀请码哈希是历史身份种子，不是可跨项目复用的账号机制。新建项目应在执行前去掉/替换这两类身份种子，再按本文件初始化新 Owner / 邀请码。历史角色 repair 不要用于任意新用户。
 
